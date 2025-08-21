@@ -59,14 +59,6 @@ class BuyOrderPlanner:
 
     
     # ──────────────── GTT Plan Generation ──────────────── #
-    def _gtt_exists_for_entry(self, symbol, entry_price, gtt_cache):
-        tolerance = 0.005  # 0.5%
-        for gtt in gtt_cache:
-            if gtt["tradingsymbol"].upper() == symbol.upper():
-                gtt_price = gtt["price"]
-                if abs(gtt_price - entry_price) / entry_price <= tolerance:
-                    return True
-        return False
 
     def generate_plan(self, scrip: Dict) -> List[Dict]:
         symbol = scrip["symbol"]
@@ -75,6 +67,14 @@ class BuyOrderPlanner:
         entry2 = scrip.get("entry2")
         entry3 = scrip.get("entry3")
         allocated = scrip["Allocated"]
+
+        gtt_cache = session.get_gtt_cache()
+        if symbol.upper() in [g["tradingsymbol"].upper() for g in gtt_cache if g["transaction_type"] == "BUY"]:
+            logging.info(f"⏭️ Skipping {symbol}: GTT already exists")
+            return [{
+                "symbol": symbol,
+                "skip_reason": "GTT already exists for symbol"
+            }]
 
         ltp = self.cmp_manager.get_cmp(exchange, symbol)
         if ltp is None or ltp == 0 or (isinstance(ltp, float) and math.isnan(ltp)):
@@ -85,7 +85,9 @@ class BuyOrderPlanner:
             logging.error(f"❌ Skipping {symbol}: Invalid allocation ({allocated})")
             return []
 
-        qty = int(allocated / ltp)
+        entry_allocated = allocated / 3
+        qty = int(entry_allocated / ltp)
+
         if qty == 0:
             logging.debug(f"⚠️ Skipping {symbol}: Computed quantity is 0")
             return []
@@ -139,14 +141,6 @@ class BuyOrderPlanner:
         order_price = min(entry_price, round(ltp * 1.025, 2)) if entry_price > ltp else entry_price
         order_price, trigger = self.adjust_trigger_and_order_price(order_price, ltp)
 
-        gtt_cache = session.get_gtt_cache()
-        if self._gtt_exists_for_entry(symbol, entry_price, gtt_cache):
-            logging.info(f"⏭️ Skipping {symbol}: GTT already exists for entry level {entry_level}")
-            return [{
-                "symbol": symbol,
-                "skip_reason": "GTT already exists for entry level"
-            }]
-
         return [{
             "symbol": symbol,
             "exchange": exchange,
@@ -194,5 +188,6 @@ class BuyOrderPlanner:
 
             results.append(result)
 
+        self.session.refresh_gtt_cache()  # ✅ Refresh cache after placing GTTs
         return results
 

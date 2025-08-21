@@ -76,19 +76,19 @@ def list_entry_levels(filter_ltp: float = typer.Option(None, help="Filter orders
 
                 for order in plan:
                     if "skip_reason" in order:
-                        if order["skip_reason"] == "GTT already exists for entry level":
+                        if order["skip_reason"] == "GTT already exists for symbol":
                             skipped_gtt.append(symbol)
                         elif order["skip_reason"] == "Holding exceeded allocated amount":
                             skipped_holding.append(symbol)
                     else:
                         new_orders.append(order)
-                        planned_symbols.add(symbol)  # ✅ Mark symbol as processed
+                    planned_symbols.add(symbol)  # ✅ Mark symbol as processed
 
             except Exception as e:
                 typer.echo(f"❌ Error generating plan for {symbol}: {e}")
 
         if skipped_gtt:
-            print("\n📌 Skipped - GTT already exists for entry level:")
+            print("\n📌 Skipped - GTT already exists:")
             print("  " + ", ".join(skipped_gtt))
 
         if skipped_holding:
@@ -101,9 +101,21 @@ def list_entry_levels(filter_ltp: float = typer.Option(None, help="Filter orders
             new_orders = [o for o in new_orders if o["ltp"] > filter_ltp]
 
         if new_orders:
+            display_orders = []
+            for order in new_orders:
+                order_amount = round(order["price"] * order["qty"], 2)
+                display_orders.append({
+                    "Symbol": order["symbol"],
+                    "Order Price": order["price"],
+                    "Trigger Price": order["trigger"],
+                    "LTP": order["ltp"],
+                    "Order Amount": order_amount,
+                    "Entry Level": order["entry"]
+                })
+
             print_table(
-                new_orders,
-                ["symbol", "price", "trigger", "ltp", "qty", "entry"],
+                display_orders,
+                ["Symbol", "Order Price", "Trigger Price", "LTP", "Order Amount", "Entry Level"],
                 title="📊 New GTT Plan - Entry Level Strategy",
                 spacing=6
             )
@@ -151,7 +163,6 @@ def place_gtt_orders():
     except Exception as e:
         print(f"⚠️ Failed to delete cache file: {e}")
 
-
 @app.command()
 def analyze_gtt_variance(threshold: float = typer.Option(..., help="Variance threshold to filter GTTs")):
     """Analyze GTT orders below variance threshold."""
@@ -167,8 +178,9 @@ def adjust_gtt_orders(target_variance: float = typer.Option(..., help="Target va
     session.refresh_all_caches()
     manager = GTTManager(session.kite, session.get_cmp_manager(), session)
     planner = BuyOrderPlanner(session.kite, session.get_cmp_manager(), holdings=session.get_holdings())
-    result = manager.analyze_orders()
-    to_adjust = [o for o in result["orders"] if o["Variance (%)"] < target_variance]
+    orders = manager.analyze_gtt_buy_orders()
+    to_adjust = [o for o in orders if o["Variance (%)"] < target_variance]
+
     adjusted_symbols = manager.adjust_orders(to_adjust, target_variance, planner.adjust_trigger_and_order_price)
     print_table(adjusted_symbols, ["Symbol", "Trigger Price", "LTP", "Variance (%)"], title="📉 GTT Orders Adjusted")
 
@@ -177,8 +189,8 @@ def delete_gtt_orders(threshold: float = typer.Option(..., help="Variance thresh
     """Delete GTT orders above variance threshold."""
     session.refresh_all_caches()
     manager = GTTManager(session.kite, session.get_cmp_manager(), session)
-    result = manager.analyze_orders()
-    to_delete = [o for o in result["orders"] if o["Variance (%)"] > threshold]
+    orders = manager.analyze_gtt_buy_orders()
+    to_delete = [o for o in orders if o["Variance (%)"] > threshold]
 
     deleted = manager.delete_orders_above_variance(to_delete, threshold)
 
@@ -192,12 +204,52 @@ def delete_gtt_orders(threshold: float = typer.Option(..., help="Variance thresh
         print("⚠️ No GTTs were deleted.")
 
 @app.command()
+def analyze_gtt_variance(threshold: float = typer.Option(100.0, help="Variance threshold to filter GTTs")):
+    """Analyze buy GTT orders and display those below a variance threshold."""
+    session.refresh_all_caches()
+    manager = GTTManager(session.kite, session.get_cmp_manager(), session)
+
+    orders = manager.analyze_gtt_buy_orders()
+    filtered = [o for o in orders if o["Variance (%)"] <= threshold]
+
+    print_table(
+        filtered,
+        ["Symbol", "Trigger Price", "LTP", "Variance (%)", "Qty", "Price", "GTT ID"],
+        title=f"📉 GTT Orders Below Threshold ({threshold}%)"
+    )
+
+@app.command()
+def list_duplicate_gtt_symbols():
+    """List symbols with duplicate GTT orders."""
+    session.refresh_all_caches()
+    manager = GTTManager(session.kite, session.get_cmp_manager(), session)
+
+    duplicates = manager.get_duplicate_gtt_symbols()
+    return duplicates
+
+@app.command()
+def show_total_buy_gtt_amount(threshold: float = None) -> float:
+    """Show total capital required for buy GTT orders."""
+    session.refresh_all_caches()
+    manager = GTTManager(session.kite, session.get_cmp_manager(), session)
+    
+    total_amount = manager.get_total_buy_gtt_amount(threshold)
+    return total_amount
+
+
+@app.command()
 def analyze_holdings(filters: str = typer.Option(None, help="JSON string of filters")):
     """Analyze holdings and display ROI metrics."""
     try:
         session.refresh_all_caches()
         parsed_filters = json.loads(filters) if filters else {}
         results = holdings_analyzer.analyze_holdings(session.kite, session.get_cmp_manager(), parsed_filters)
+
+        # 🔧 Format Trend field as 'UP(5)'
+        for row in results:
+            trend = row.get("Trend", "-")
+            trend_days = row.get("Trend Days", "")
+            row["Trend"] = f"{trend}({trend_days})" if trend_days != "" else trend
 
         print_table(
             results,
@@ -208,6 +260,14 @@ def analyze_holdings(filters: str = typer.Option(None, help="JSON string of filt
     except Exception as e:
         print(f"❌ Error analyzing holdings: {e}")
 
+@app.command()
+def update_tradebook():
+    """Update tradebook from Kite and show summary."""
+    session.refresh_all_caches()
+    summary = holdings_analyzer.update_tradebook(session.kite)
+    print("\n📊 Tradebook Update Summary:")
+    for key, value in summary.items():
+        print(f" - {key.replace('_', ' ').capitalize()}: {value}")
 
 if __name__ == "__main__":
     app()

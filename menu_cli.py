@@ -6,12 +6,43 @@ import logging
 from core.utils import setup_logging
 from core.session_singleton import shared_session as session
 
+from core.session_singleton import shared_session as session
+from core.holdings import HoldingsAnalyzer
+
+
 setup_logging(logging.INFO)
 runner = CliRunner()
 
+from core.cli import list_duplicate_gtt_symbols, show_total_buy_gtt_amount
+
+def menu_gtt_summary():
+    
+    duplicates = list_duplicate_gtt_symbols()
+    if duplicates:
+        print("\n🔁 Duplicate GTT Symbols:")
+        for symbol in duplicates:
+            print(f" - {symbol}")
+    else:
+        print("✅ No duplicate GTT symbols found.")
+
+    threshold = 5
+    total_amount = show_total_buy_gtt_amount(threshold)
+    print(f"💰 Total Buy GTT Amount Required (variance ≤ {threshold}%): ₹{total_amount}")
+
+
 def main_menu():
     #session.refresh_all_caches()  # ✅ Initial cache refresh
+    print("🔄 Refreshing all caches...")
 
+    
+
+    print("🔄 Initializing application and uploading trades...")
+    summary = HoldingsAnalyzer().update_tradebook(session.kite)
+    print("\n📊 Tradebook Upload Summary:")
+    for key, value in summary.items():
+        print(f" - {key.replace('_', ' ').capitalize()}: {value}")
+
+    
     while True:
         print("\n📋 Menu:")
         print("1. List GTT orders")
@@ -34,10 +65,18 @@ def main_menu():
                     print(f"❌ Exception occurred: {result.exception}")
 
         elif choice == "2":
-            result = runner.invoke(app, ["analyze-gtt-variance", "--threshold", "45"], catch_exceptions=False)
+            print("\n📉 GTT Orders Below Threshold:")
+            result = runner.invoke(app, ["analyze-gtt-variance", "--threshold", "100.0"], catch_exceptions=False)
             print(result.output)
-            if result.exception:
-                print(f"❌ Exception occurred: {result.exception}")
+
+            menu_gtt_summary()
+
+            # result = runner.invoke(app, ["list-duplicate-gtt-symbols"], catch_exceptions=False)
+            # print(result.output)
+
+            # result = runner.invoke(app, ["show-total-buy-gtt-amount"], catch_exceptions=False)
+            # print(result.output)
+
 
             print("\n📌 Sub-options:")
             print("1. Delete GTTs with variance greater than a custom threshold")

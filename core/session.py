@@ -26,14 +26,16 @@ class SessionCache:
         return (time.time() - self.last_refreshed) > self.ttl
 
     def refresh_all_caches(self):
-        print("🔄 Refreshing all caches...")
+        #print("🔄 Refreshing all caches...")
         self.refresh_holdings()
+
+        self.refresh_entry_levels()
+
+        self.refresh_gtt_cache()
         # print("📂 holding: ")
         # print(self.holdings)
-        self.refresh_entry_levels()
         # print("📂 Entry level: ")
         # print(self.entry_levels)
-        self.refresh_gtt_cache()
         # print("📂 GTT: ")
         # print(self.gtt_cache)
         self.refresh_cmp_cache()
@@ -50,7 +52,6 @@ class SessionCache:
             gtts = self.kite.get_gtts()
             self.gtt_cache = []
             for g in gtts:
-                if g.get('status') == 'active':
                     self.gtt_cache.append({
                         'id': g.get('id'),
                         'created_at': g.get('created_at'),

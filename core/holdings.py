@@ -13,51 +13,71 @@ class HoldingsAnalyzer:
         self.roi_path = roi_path
 
     # ──────────────── Tradebook Update ──────────────── #
-    def update_tradebook(self, kite):
-        new_trades = kite.trades()
-        new_df = pd.DataFrame(new_trades)
-        if new_df.empty:
-            logging.info("No new trades found.")
-            return
+    def update_tradebook(self, kite) -> dict:
+        result_summary = {
+            "total_records_fetched": 0,
+            "records_uploaded": 0,
+            "duplicates_skipped": 0,
+            "records_failed": 0
+        }
 
-        new_df = new_df.rename(columns={
-            "tradingsymbol": "symbol",
-            "exchange": "exchange",
-            "instrument_token": "isin",
-            "transaction_type": "trade_type",
-            "quantity": "quantity",
-            "average_price": "price",
-            "trade_id": "trade_id",
-            "order_id": "order_id",
-            "exchange_timestamp": "order_execution_time"
-        })
+        try:
+            new_trades = kite.trades()
+            new_df = pd.DataFrame(new_trades)
+            result_summary["total_records_fetched"] = len(new_df)
 
-        new_df["isin"] = ""
-        new_df["segment"] = "EQ"
-        new_df["series"] = new_df["symbol"].apply(lambda x: "EQ")
-        new_df["auction"] = False
-        new_df["trade_date"] = pd.to_datetime(new_df["order_execution_time"]).dt.date
-        new_df["trade_date"] = new_df["trade_date"].apply(lambda x: x.strftime("%#m/%#d/%Y"))
+            if new_df.empty:
+                logging.info("No new trades found.")
+                return result_summary
+            new_df = new_df.rename(columns={
+                "tradingsymbol": "symbol",
+                "exchange": "exchange",
+                "instrument_token": "isin",
+                "transaction_type": "trade_type",
+                "quantity": "quantity",
+                "average_price": "price",
+                "trade_id": "trade_id",
+                "order_id": "order_id",
+                "exchange_timestamp": "order_execution_time"
+            })
 
-        new_df = new_df[[
-            "symbol", "isin", "trade_date", "exchange", "segment", "series",
-            "trade_type", "auction", "quantity", "price", "trade_id", "order_id", "order_execution_time"
-        ]]
+            new_df["isin"] = ""
+            new_df["segment"] = "EQ"
+            new_df["series"] = new_df["symbol"].apply(lambda x: "EQ")
+            new_df["auction"] = False
+            new_df["trade_date"] = pd.to_datetime(new_df["order_execution_time"]).dt.date
+            new_df["trade_date"] = new_df["trade_date"].apply(lambda x: x.strftime("%#m/%#d/%Y"))
 
-        if os.path.exists(self.tradebook_path):
-            existing_df = pd.read_csv(self.tradebook_path)
-            existing_ids = set(existing_df["trade_id"].astype(str))
-        else:
-            existing_df = pd.DataFrame(columns=new_df.columns)
-            existing_ids = set()
+            new_df = new_df[[
+                "symbol", "isin", "trade_date", "exchange", "segment", "series",
+                "trade_type", "auction", "quantity", "price", "trade_id", "order_id", "order_execution_time"
+            ]]
 
-        new_df = new_df[~new_df["trade_id"].astype(str).isin(existing_ids)]
-        if not new_df.empty:
-            updated_df = pd.concat([existing_df, new_df], ignore_index=True)
-            updated_df.to_csv(self.tradebook_path, index=False)
-            logging.info(f"Appended {len(new_df)} new trades to the tradebook.")
-        else:
-            logging.info("No new trades to append.")
+            if os.path.exists(self.tradebook_path):
+                existing_df = pd.read_csv(self.tradebook_path)
+                existing_ids = set(existing_df["trade_id"].astype(str))
+            else:
+                existing_df = pd.DataFrame(columns=new_df.columns)
+                existing_ids = set()
+
+            initial_count = len(new_df)
+            new_df = new_df[~new_df["trade_id"].astype(str).isin(existing_ids)]
+            result_summary["duplicates_skipped"] = initial_count - len(new_df)
+
+            if not new_df.empty:
+                updated_df = pd.concat([existing_df, new_df], ignore_index=True)
+                updated_df.to_csv(self.tradebook_path, index=False)
+                result_summary["records_uploaded"] = len(new_df)
+                logging.info(f"Appended {len(new_df)} new trades to the tradebook.")
+            else:
+                logging.info("No new trades to append.")
+
+        except Exception as e:
+            logging.error(f"Failed to update tradebook: {e}")
+            result_summary["records_failed"] = result_summary["total_records_fetched"]
+
+        return result_summary
+
 
     # ──────────────── ROI Writer ──────────────── #
     def write_roi_results(self, results: List[Dict]):
@@ -97,21 +117,53 @@ class HoldingsAnalyzer:
         logging.info(f"ROI results written to {self.roi_path}")
 
     # ──────────────── Holdings Analysis ──────────────── #
-    def analyze_symbol_trend(self, symbol: str):
+    def analyze_symbol_trend(self, symbol: str, threshold=0.002):
+        """
+        Analyze the trend (uptrend or downtrend) for a given symbol in roi-master.csv.
+        Returns ("UP", n), ("DOWN", n), or ("FLAT", 1) where n is the number of days the trend has continued.
+        Small fluctuations within the threshold are ignored.
+        """
         try:
+            import pandas as pd
             if not os.path.exists(self.roi_path):
                 return None
+
             df = pd.read_csv(self.roi_path)
-            df["Date"] = pd.to_datetime(df["Date"], errors='coerce')
             df = df[df["Symbol"].str.upper() == symbol.upper()]
-            df = df.sort_values(by="Date", ascending=False)
-            latest = df.head(5)["ROI per day"].tolist()
-            if len(latest) < 2:
+            if df.empty or len(df) < 2:
                 return None
-            direction = "UP" if latest[-1] > latest[0] else "DOWN" if latest[-1] < latest[0] else "FLAT"
-            return (direction, len(latest))
-        except Exception:
+
+            df["Date"] = pd.to_datetime(df["Date"], errors='coerce')
+            df = df.sort_values("Date", ascending=True)
+            roi_series = df["ROI per day"].values
+
+            trend = None
+            count = 1
+
+            for i in range(len(roi_series) - 1, 0, -1):
+                today = roi_series[i]
+                prev = roi_series[i - 1]
+                diff = today - prev
+
+                if trend is None:
+                    if abs(diff) <= threshold:
+                        return "FLAT", 1
+                    trend = "UP" if diff > 0 else "DOWN"
+                    count = 1
+                else:
+                    if trend == "UP" and diff > threshold:
+                        count += 1
+                    elif trend == "DOWN" and diff < -threshold:
+                        count += 1
+                    else:
+                        break
+
+            return trend, count
+
+        except Exception as e:
+            print(f"Error analyzing symbol trend: {e}")
             return None
+
 
     def apply_filters(self, results: List[Dict], filters: Dict) -> List[Dict]:
         if not filters:
@@ -197,7 +249,8 @@ class HoldingsAnalyzer:
             roi_per_day = (roi / days_held) if days_held > 0 else 0
 
             trend_result = self.analyze_symbol_trend(symbol)
-            trend_str = f"{trend_result[0]}({trend_result[1]})" if trend_result else "-"
+            trend_str = trend_result[0] if trend_result else "-"
+            trend_days = trend_result[1] if trend_result else None
 
             results.append({
                 "Symbol": symbol,
@@ -208,6 +261,7 @@ class HoldingsAnalyzer:
                 "P&L%": round(pnl_pct, 2),
                 "ROI/Day": round(roi_per_day, 2),
                 "Trend": trend_str,
+                "Trend Days": trend_days,
                 "Quality": quality
             })
 
