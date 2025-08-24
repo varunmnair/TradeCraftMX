@@ -41,9 +41,10 @@ class BuyOrderPlanner:
                 trigger = max_trigger
                 order_price = round(trigger + exact_diff, 2)
 
-        # Round to nearest 0.05
-        order_price = round(round(order_price / 0.05) * 0.05, 2)
-        trigger = round(round(trigger / 0.05) * 0.05, 2)
+        # Round based on LTP
+        tick_size = 0.05 if ltp < 500 else 0.1
+        order_price = round(round(order_price / tick_size) * tick_size, 2)
+        trigger = round(round(trigger / tick_size) * tick_size, 2)
 
         # ✅ Final validation
         actual_diff = abs(trigger - ltp) / ltp
@@ -56,6 +57,7 @@ class BuyOrderPlanner:
             order_price = round(trigger - exact_diff, 2)
 
         return order_price, trigger
+
 
     
     # ──────────────── GTT Plan Generation ──────────────── #

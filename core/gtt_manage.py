@@ -21,18 +21,20 @@ class GTTManager:
                     order_data = g["orders"][0]
                     transaction_type = order_data.get("transaction_type")
                     qty = order_data.get("quantity")
-                    price = order_data.get("price")
                 else:
                     transaction_type = g.get("transaction_type")
                     qty = g.get("quantity")
-                    price = g.get("price")
 
                 if transaction_type != self.kite.TRANSACTION_TYPE_BUY:
                     continue
 
-                symbol = g.get("tradingsymbol") or g.get("condition", {}).get("tradingsymbol")
+                symbol = g.get("tradingsymbol") or g.get("condition", {}).get(
+                    "tradingsymbol"
+                )
                 exchange = g.get("exchange") or g.get("condition", {}).get("exchange")
-                trigger_values = g.get("trigger_values") or g.get("condition", {}).get("trigger_values")
+                trigger_values = g.get("trigger_values") or g.get(
+                    "condition", {}
+                ).get("trigger_values")
                 trigger = trigger_values[0] if trigger_values else None
 
                 if not symbol or not exchange or trigger is None:
@@ -43,20 +45,20 @@ class GTTManager:
                     logging.warning(f"Skipping {symbol} due to missing LTP.")
                     continue
 
-                gtt_id = g.get("id")
                 variance = round(((ltp - trigger) / trigger) * 100, 2)
 
                 if symbol not in seen_symbols:
-                    orders.append({
-                        "Symbol": symbol,
-                        "Exchange": exchange,
-                        "Trigger Price": trigger,
-                        "LTP": ltp,
-                        "Variance (%)": variance,
-                        "Qty": qty,
-                        "Price": price,
-                        "GTT ID": gtt_id
-                    })
+                    orders.append(
+                        {
+                            "Symbol": symbol,
+                            "Exchange": exchange,
+                            "Trigger Price": trigger,
+                            "LTP": ltp,
+                            "Variance (%)": variance,
+                            "Qty": qty,
+                            "Buy Amount": int(qty * ltp),
+                        }
+                    )
                     seen_symbols.add(symbol)
 
             return sorted(orders, key=lambda x: x["Variance (%)"])

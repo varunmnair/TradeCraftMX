@@ -214,7 +214,7 @@ def analyze_gtt_variance(threshold: float = typer.Option(100.0, help="Variance t
 
     print_table(
         filtered,
-        ["Symbol", "Trigger Price", "LTP", "Variance (%)", "Qty", "Price", "GTT ID"],
+        ["Symbol", "Trigger Price", "LTP", "Variance (%)", "Qty", "Buy Amount"],
         title=f"📉 GTT Orders Below Threshold ({threshold}%)"
     )
 
@@ -236,14 +236,21 @@ def show_total_buy_gtt_amount(threshold: float = None) -> float:
     total_amount = manager.get_total_buy_gtt_amount(threshold)
     return total_amount
 
-
 @app.command()
-def analyze_holdings(filters: str = typer.Option(None, help="JSON string of filters")):
-    """Analyze holdings and display ROI metrics."""
+def analyze_holdings(
+    filters: str = typer.Option(None, help="JSON string of filters"),
+    sort_by: str = typer.Option("W ROI", help="Column to sort by (e.g., 'ROI/Day', 'P&L')")
+):
+    """Analyze holdings and display ROI metrics including Weighted ROI."""
     try:
         session.refresh_all_caches()
         parsed_filters = json.loads(filters) if filters else {}
-        results = holdings_analyzer.analyze_holdings(session.kite, session.get_cmp_manager(), parsed_filters)
+        results = holdings_analyzer.analyze_holdings(
+            session.kite,
+            session.get_cmp_manager(),
+            parsed_filters,
+            sort_by=sort_by
+        )
 
         # 🔧 Format Trend field as 'UP(5)'
         for row in results:
@@ -253,12 +260,13 @@ def analyze_holdings(filters: str = typer.Option(None, help="JSON string of filt
 
         print_table(
             results,
-            ["Symbol", "Invested", "P&L", "Yld/Day", "Age", "P&L%", "ROI/Day", "Trend", "Quality"],
+            ["Symbol", "Invested", "P&L", "Yld/Day", "Age", "P&L%", "ROI/Day", "W ROI", "Trend", "Quality"],
             title="📊 Holdings ROI",
             spacing=6
         )
     except Exception as e:
         print(f"❌ Error analyzing holdings: {e}")
+
 
 @app.command()
 def update_tradebook():
@@ -268,6 +276,15 @@ def update_tradebook():
     print("\n📊 Tradebook Update Summary:")
     for key, value in summary.items():
         print(f" - {key.replace('_', ' ').capitalize()}: {value}")
+
+@app.command
+def get_total_invested_amount():
+    session.refresh_all_caches()
+    holdings = session.get_holdings()
+    analyzer = HoldingsAnalyzer()
+    total = analyzer.get_total_invested(holdings)
+    return {"total_invested": round(total, 2)}
+
 
 if __name__ == "__main__":
     app()

@@ -34,13 +34,10 @@ def main_menu():
     #session.refresh_all_caches()  # ✅ Initial cache refresh
     print("🔄 Refreshing all caches...")
 
-    
-
     print("🔄 Initializing application and uploading trades...")
     summary = HoldingsAnalyzer().update_tradebook(session.kite)
-    print("\n📊 Tradebook Upload Summary:")
-    for key, value in summary.items():
-        print(f" - {key.replace('_', ' ').capitalize()}: {value}")
+    summary_str = " - ".join([f"{key.replace('_', ' ').capitalize()}: {value}" for key, value in summary.items()])
+    print(f"\n📊 Tradebook Upload Summary: {summary_str}")
 
     
     while True:
@@ -108,6 +105,31 @@ def main_menu():
                 print(result.output)
                 if result.exception:
                     print(f"❌ Exception occurred: {result.exception}")
+
+                while True:
+                    print("\n🔍 Sort by:")
+                    print("1. ROI per day")
+                    print("2. Weighted ROI")
+                    sub_choice = input("Enter your choice (1/2 or press Enter to go back to main menu): ").strip()
+
+                    if not sub_choice:
+                        break
+
+                    sort_key = ""
+                    if sub_choice == "1":
+                        sort_key = "roi_per_day"
+                    elif sub_choice == "2":
+                        sort_key = "weighted_roi"
+                    else:
+                        print("⚠️ Invalid choice. Please try again.")
+                        continue
+
+                    if sort_key:
+                        sort_args = args + ["--sort-by", sort_key]
+                        result = runner.invoke(app, sort_args, catch_exceptions=False)
+                        print(result.output)
+
+
             except Exception as e:
                 print(f"❌ Error analyzing holdings: {e}")
 

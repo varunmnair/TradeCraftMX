@@ -187,7 +187,10 @@ class HoldingsAnalyzer:
                 filtered.append(r)
         return filtered
 
-    def analyze_holdings(self, kite, cmp_manager, filters=None) -> List[Dict]:
+    def get_total_invested(self, holdings: List[Dict]) -> float:
+        return sum(h["quantity"] * h["average_price"] for h in holdings if h["quantity"] > 0 and h["average_price"] > 0)
+
+    def analyze_holdings(self, kite, cmp_manager, filters=None, sort_by="ROI/Day") -> List[Dict]:
         if filters is None:
             filters = {}
 
@@ -201,6 +204,7 @@ class HoldingsAnalyzer:
 
         holdings = kite.holdings()
         results = []
+        total_invested = self.get_total_invested(holdings)
 
         for holding in holdings:
             symbol = holding["tradingsymbol"]
@@ -247,6 +251,7 @@ class HoldingsAnalyzer:
 
             yld_per_day = (pnl / days_held) if days_held > 0 else 0
             roi_per_day = (roi / days_held) if days_held > 0 else 0
+            weighted_roi = (roi_per_day * invested / total_invested) if total_invested > 0 else 0
 
             trend_result = self.analyze_symbol_trend(symbol)
             trend_str = trend_result[0] if trend_result else "-"
@@ -254,17 +259,23 @@ class HoldingsAnalyzer:
 
             results.append({
                 "Symbol": symbol,
-                "Invested": round(invested, 2),
-                "P&L": round(pnl, 2),
-                "Yld/Day": round(yld_per_day, 2),
+                "Invested": round(invested, 1),
+                "P&L": round(pnl, 1),
+                "Yld/Day": round(yld_per_day, 1),
                 "Age": days_held,
                 "P&L%": round(pnl_pct, 2),
                 "ROI/Day": round(roi_per_day, 2),
+                "W ROI": round(weighted_roi, 4),
                 "Trend": trend_str,
                 "Trend Days": trend_days,
                 "Quality": quality
             })
 
+
         results = self.apply_filters(results, filters)
-        sorted_results = sorted(results, key=lambda x: x["ROI/Day"], reverse=True)
+        
+        sort_key_mapping = {"roi_per_day": "ROI/Day", "weighted_roi": "W ROI"}
+        sort_key = sort_key_mapping.get(sort_by, sort_by)
+
+        sorted_results = sorted(results, key=lambda x: x.get(sort_key, 0), reverse=True)
         return sorted_results
