@@ -51,15 +51,31 @@ def main_menu():
         choice = input("Enter your choice: ").strip()
 
         if choice == "1":
+            # Step 1: List entry-level GTTs
             result = runner.invoke(app, ["list-entry-levels"], catch_exceptions=False)
             print(result.output)
             if result.exception:
                 print(f"❌ Exception occurred: {result.exception}")
-            if input("\n1.1 Place GTT orders? (y/n): ").lower() == "y":
+
+            if input("\n1.1 Place entry-level GTT orders? (y/n): ").lower() == "y":
                 result = runner.invoke(app, ["place-gtt-orders"], catch_exceptions=False)
                 print(result.output)
                 if result.exception:
                     print(f"❌ Exception occurred: {result.exception}")
+
+            # Step 2: Show dynamic averaging plan
+            result = runner.invoke(app, ["plan-dynamic-avg"], catch_exceptions=False)
+            print("\n📉 Dynamic Averaging Buy Plan:")
+            print(result.output)
+            if result.exception:
+                print(f"❌ Exception occurred: {result.exception}")
+
+            if input("\n1.2 Place dynamic averaging GTT orders? (y/n): ").lower() == "y":
+                result = runner.invoke(app, ["place-gtt-orders"], catch_exceptions=False)
+                print(result.output)
+                if result.exception:
+                    print(f"❌ Exception occurred: {result.exception}")
+
 
         elif choice == "2":
             print("\n📉 GTT Orders Below Threshold:")

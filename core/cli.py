@@ -285,6 +285,32 @@ def get_total_invested_amount():
     total = analyzer.get_total_invested(holdings)
     return {"total_invested": round(total, 2)}
 
+@app.command()
+def plan_dynamic_avg():
+    """Plan GTT buy orders for dynamic averaging strategy."""
+    session.refresh_all_caches()
+    from core.dynamic_avg import DynamicAveragingPlanner
+    planner = DynamicAveragingPlanner()
+    candidates = planner.identify_candidates()
+    plan = planner.generate_buy_plan(candidates)
+
+    print_table(
+        plan,
+        ["symbol", "exchange", "price", "trigger", "qty", "ltp", "strategy", "leg", "entry"],
+        title="📉 Dynamic Averaging Buy Plan",
+        spacing=6
+    )
+
+    if hasattr(planner, "skipped_symbols") and planner.skipped_symbols:
+        print_table(
+            planner.skipped_symbols,
+            ["symbol", "skip_reason"],
+            title="⏭️ Skipped Symbols",
+            spacing=6
+        )
+
+    session.write_gtt_plan(plan)
+
 
 if __name__ == "__main__":
     app()

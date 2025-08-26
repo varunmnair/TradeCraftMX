@@ -1,0 +1,13 @@
+[
+  {
+    "symbol": "NAHARINDUS",
+    "exchange": "BSE",
+    "price": 111.9,
+    "trigger": 111.8,
+    "qty": 37,
+    "ltp": 110.25,
+    "strategy": "Dynamic Averaging",
+    "leg": "DA1",
+    "entry": "E3"
+  }
+]

@@ -36,12 +36,14 @@ class BrokerSession:
         return None
 
     # ──────────────── Zerodha (Kite) ──────────────── #
-    def generate_new_kite_token(self, kite: KiteConnect) -> str:
-        login_url = kite.login_url()
-        print(f"🔐 Login URL: {login_url}")
-        webbrowser.open(login_url)
-        full_url = input("📥 Paste the full redirected URL after login: ")
-        parsed_url = urlparse(full_url)
+    def generate_new_kite_token(self, kite: KiteConnect, redirected_url: str = None) -> str:
+        if not redirected_url:
+            login_url = kite.login_url()
+            print(f"🔐 Login URL: {login_url}")
+            webbrowser.open(login_url)
+            redirected_url = input("📥 Paste the full redirected URL after login: ")
+        
+        parsed_url = urlparse(redirected_url)
         request_token = parse_qs(parsed_url.query).get("request_token", [None])[0]
         if not request_token:
             raise ValueError("❌ Could not extract request_token from the URL.")
@@ -70,14 +72,16 @@ class BrokerSession:
         kite.set_access_token(access_token)
         return kite
     # ──────────────── Upstox ──────────────── #
-    def generate_new_upstox_token(self) -> str:
-        login_url = (
-            f"https://api.upstox.com/v2/login/authorization/dialog?"
-            f"response_type=code&client_id={self.upstox_api_key}&redirect_uri={self.upstox_redirect_uri}"
-        )
-        print("🔗 Opening Upstox login URL in your browser...")
-        webbrowser.open(login_url)
-        redirected_url = input("✅ Paste the FULL redirected URL after login:\n")
+    def generate_new_upstox_token(self, redirected_url: str = None) -> str:
+        if not redirected_url:
+            login_url = (
+                f"https://api.upstox.com/v2/login/authorization/dialog?"
+                f"response_type=code&client_id={self.upstox_api_key}&redirect_uri={self.upstox_redirect_uri}"
+            )
+            print("🔗 Opening Upstox login URL in your browser...")
+            webbrowser.open(login_url)
+            redirected_url = input("✅ Paste the FULL redirected URL after login:\n")
+
         code = parse_qs(urlparse(redirected_url).query).get("code", [None])[0]
         token_payload = {
             "code": code,

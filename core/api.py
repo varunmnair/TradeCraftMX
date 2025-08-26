@@ -181,3 +181,13 @@ def analyze_holdings(filters: str = Query(None, description="JSON string of filt
         return {"results": results}
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
+    
+@app.get("/dynamic-avg/plan")
+def api_plan_dynamic_avg():
+    session.refresh_all_caches()
+    from core.dynamic_avg import DynamicAveragingPlanner
+    planner = DynamicAveragingPlanner()
+    candidates = planner.identify_candidates()
+    plan = planner.generate_buy_plan(candidates)
+    return {"plan": plan}
+
