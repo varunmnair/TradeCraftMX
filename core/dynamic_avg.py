@@ -24,6 +24,16 @@ class DynamicAveragingPlanner:
         for holding in self.holdings:
             symbol = holding["tradingsymbol"].replace("#", "").replace("-BE", "").upper()
             
+            # if symbol == 'NAHARINDUS':
+            #     print(f'\n--- Debugging {symbol} ---')
+            #     entry_for_debug = entry_levels_map.get(symbol)
+            #     allocated_for_debug = float(entry_for_debug.get("Allocated", 0)) if entry_for_debug else 0
+            #     held_qty_for_debug = holding["quantity"] + holding.get("t1_quantity", 0)
+            #     avg_price_for_debug = holding["average_price"]
+            #     invested_amount_for_debug = avg_price_for_debug * held_qty_for_debug
+            #     print(f'Symbol: {symbol}, Allocated: {allocated_for_debug}, Invested: {invested_amount_for_debug}, Held Qty: {held_qty_for_debug}, Avg Price: {avg_price_for_debug}')
+            #     print(f'--- End Debugging {symbol} ---\n')
+            
             entry = entry_levels_map.get(symbol)
             if not entry:
                 self.skipped_symbols.append({"symbol": symbol, "skip_reason": "Not in entry levels"})
@@ -121,11 +131,39 @@ class DynamicAveragingPlanner:
             ltp = c["ltp"]
             da_legs = c["da_legs"]
             da_trigger_offset = c["da_trigger_offset"]
+
+            invested_amount = c['held_qty'] * c['avg_price']
+            remaining_allocation = c['allocated'] - invested_amount
+            
             remaining_qty = c["target_qty"] - c["held_qty"]
+            
+            original_remaining_qty = remaining_qty
+            
+            # Adjust quantity based on remaining allocation and LTP
+            if remaining_qty * ltp > remaining_allocation:
+                remaining_qty = math.floor(remaining_allocation / ltp)
+
+            # if symbol == 'NAHARINDUS':
+            #     print(f'\n--- Debugging {symbol} Plan Generation ---')
+            #     print(f'Candidate details: {c}')
+            #     print(f'Target Qty: {c["target_qty"]}, Held Qty: {c["held_qty"]}')
+            #     print(f'Original Remaining Qty: {original_remaining_qty}')
+            #     print(f'Invested Amount: {invested_amount}, Remaining Allocation: {remaining_allocation}')
+            #     print(f'Cost of original remaining qty: {original_remaining_qty * ltp}')
+            #     print(f'Adjusted Remaining Qty: {remaining_qty}')
+
             if remaining_qty <= 0:
                 continue
 
             leg_qty = int(remaining_qty / da_legs)
+
+            # if symbol == 'NAHARINDUS':
+            #     print(f'DA Legs: {da_legs}, Leg Qty: {leg_qty}')
+            #     print(f'--- End Debugging {symbol} Plan Generation ---\n')
+
+            if leg_qty <= 0:
+                continue
+
             trigger_price = round(ltp * (1 + da_trigger_offset / 100), 2)
             order_price, trigger_price = self.planner.adjust_trigger_and_order_price(trigger_price, ltp)
 
@@ -145,20 +183,10 @@ class DynamicAveragingPlanner:
         return plan
 
 
-# CLI command
-def plan_dynamic_avg():
+def generate_dynamic_avg_plan():
+
     session.refresh_all_caches()
     planner = DynamicAveragingPlanner()
     candidates = planner.identify_candidates()
     plan = planner.generate_buy_plan(candidates)
-
-    print_table(plan, ["symbol", "exchange", "price", "trigger", "qty", "ltp", "strategy", "leg", "entry"], title="📉 Dynamic Averaging Buy Plan")
-    session.write_gtt_plan(plan)
-
-# API endpoint
-def api_plan_dynamic_avg():
-    session.refresh_all_caches()
-    planner = DynamicAveragingPlanner()
-    candidates = planner.identify_candidates()
-    plan = planner.generate_buy_plan(candidates)
-    return {"plan": plan}
+    return plan

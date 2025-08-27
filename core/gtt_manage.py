@@ -50,6 +50,7 @@ class GTTManager:
                 if symbol not in seen_symbols:
                     orders.append(
                         {
+                            "GTT ID": g.get("id"),
                             "Symbol": symbol,
                             "Exchange": exchange,
                             "Trigger Price": trigger,

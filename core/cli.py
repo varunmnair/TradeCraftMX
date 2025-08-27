@@ -125,7 +125,6 @@ def list_entry_levels(filter_ltp: float = typer.Option(None, help="Filter orders
     except Exception as e:
         typer.echo(f"❌ Exception in list_entry_levels: {e}")
 
-
 @app.command()
 def place_gtt_orders():
     """Place GTT orders from cached plan."""
@@ -163,14 +162,14 @@ def place_gtt_orders():
     except Exception as e:
         print(f"⚠️ Failed to delete cache file: {e}")
 
-@app.command()
-def analyze_gtt_variance(threshold: float = typer.Option(..., help="Variance threshold to filter GTTs")):
-    """Analyze GTT orders below variance threshold."""
-    session.refresh_all_caches()
-    manager = GTTManager(session.kite, session.get_cmp_manager(), session)
-    result = manager.analyze_orders()
-    filtered = [o for o in result["orders"] if o["Variance (%)"] < threshold]
-    print_table(filtered, ["Symbol", "Trigger Price", "LTP", "Variance (%)"], title="📉 GTT Orders Below Threshold")
+# @app.command()
+# def analyze_gtt_variance(threshold: float = typer.Option(..., help="Variance threshold to filter GTTs")):
+#     """Analyze GTT orders below variance threshold."""
+#     session.refresh_all_caches()
+#     manager = GTTManager(session.kite, session.get_cmp_manager(), session)
+#     result = manager.analyze_orders()
+#     filtered = [o for o in result["orders"] if o["Variance (%)"] < threshold]
+#     print_table(filtered, ["Symbol", "Trigger Price", "LTP", "Variance (%)"], title="📉 GTT Orders Below Threshold")
 
 @app.command()
 def adjust_gtt_orders(target_variance: float = typer.Option(..., help="Target variance to adjust GTTs")):
@@ -198,7 +197,7 @@ def delete_gtt_orders(threshold: float = typer.Option(..., help="Variance thresh
         print_table(
             [{"Symbol": s, "Status": "Deleted"} for s in deleted],
             ["Symbol", "Status"],
-            title="🗑️ Deleted GTTs"
+            title="🗑️ Deleting GTTs"
         )
     else:
         print("⚠️ No GTTs were deleted.")
@@ -267,7 +266,6 @@ def analyze_holdings(
     except Exception as e:
         print(f"❌ Error analyzing holdings: {e}")
 
-
 @app.command()
 def update_tradebook():
     """Update tradebook from Kite and show summary."""
@@ -301,13 +299,13 @@ def plan_dynamic_avg():
         spacing=6
     )
 
-    if hasattr(planner, "skipped_symbols") and planner.skipped_symbols:
-        print_table(
-            planner.skipped_symbols,
-            ["symbol", "skip_reason"],
-            title="⏭️ Skipped Symbols",
-            spacing=6
-        )
+    # if hasattr(planner, "skipped_symbols") and planner.skipped_symbols:
+    #     print_table(
+    #         planner.skipped_symbols,
+    #         ["symbol", "skip_reason"],
+    #         title="⏭️ Skipped Symbols",
+    #         spacing=6
+    #     )
 
     session.write_gtt_plan(plan)
 
