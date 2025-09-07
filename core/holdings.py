@@ -5,12 +5,12 @@ from datetime import datetime
 from typing import List, Dict
 
 from core.utils import read_csv
-from core.entry import CSV_FILE_PATH
 
 class HoldingsAnalyzer:
-    def __init__(self, tradebook_path="data/zerodha-tradebook-master.csv", roi_path="data/roi-master.csv"):
+    def __init__(self, tradebook_path="data/zerodha-tradebook-master.csv", roi_path="data/roi-master.csv", entry_levels_path="data/entry_levels.csv"):
         self.tradebook_path = tradebook_path
         self.roi_path = roi_path
+        self.entry_levels_path = entry_levels_path
 
     # ──────────────── Tradebook Update ──────────────── #
     def update_tradebook(self, kite) -> dict:
@@ -91,6 +91,7 @@ class HoldingsAnalyzer:
         df_new = pd.DataFrame(results)
         df_new["Date"] = today_str
 
+        # Rename columns for the new data
         df_new = df_new.rename(columns={
             "Symbol": "Symbol",
             "Invested": "Invested Amount",
@@ -101,18 +102,29 @@ class HoldingsAnalyzer:
             "ROI/Day": "ROI per day"
         })
 
-        df_new = df_new[[
+        # Ensure columns are in the correct order
+        output_columns = [
             "Date", "Symbol", "Invested Amount", "Absolute Profit",
             "Yield Per Day", "Age of Stock", "Profit Percentage", "ROI per day"
-        ]]
+        ]
+        df_new = df_new.reindex(columns=output_columns)
+
 
         if os.path.exists(self.roi_path):
             df_existing = pd.read_csv(self.roi_path)
         else:
-            df_existing = pd.DataFrame(columns=df_new.columns)
+            df_existing = pd.DataFrame(columns=output_columns)
 
+        # Combine the dataframes
         df_combined = pd.concat([df_existing, df_new], ignore_index=True)
+
+        # Clean up and standardize before dropping duplicates
+        df_combined["Date"] = pd.to_datetime(df_combined["Date"], errors='coerce').dt.strftime("%Y-%m-%d")
+        df_combined["Symbol"] = df_combined["Symbol"].str.strip()
+
+        # Drop duplicates, keeping the last (most recent) entry
         df_combined.drop_duplicates(subset=["Date", "Symbol"], keep="last", inplace=True)
+        
         df_combined.to_csv(self.roi_path, index=False)
         logging.info(f"ROI results written to {self.roi_path}")
 
@@ -194,7 +206,7 @@ class HoldingsAnalyzer:
         if filters is None:
             filters = {}
 
-        entry_levels = read_csv(CSV_FILE_PATH)
+        entry_levels = read_csv(self.entry_levels_path)
         quality_map = {s["symbol"].upper(): s.get("Quality", "-") for s in entry_levels}
 
         trades_df = pd.read_csv(self.tradebook_path)
@@ -278,4 +290,7 @@ class HoldingsAnalyzer:
         sort_key = sort_key_mapping.get(sort_by, sort_by)
 
         sorted_results = sorted(results, key=lambda x: x.get(sort_key, 0), reverse=True)
+        
+        self.write_roi_results(sorted_results)
+        
         return sorted_results

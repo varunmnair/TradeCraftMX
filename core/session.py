@@ -99,11 +99,6 @@ class SessionCache:
             self.refresh_all_caches()
         return self.entry_levels
 
-    def get_existing_gtt_symbols(self):
-        if self.is_stale():
-            self.refresh_all_caches()
-        return self.gtt_symbols
-
     def get_cmp_manager(self):
         if self.is_stale():
             self.refresh_all_caches()

@@ -1,5 +1,6 @@
 import logging
 from typing import List, Dict, Callable
+from collections import Counter
 from core.session_singleton import shared_session as session
 
 
@@ -7,35 +8,93 @@ class GTTManager:
     def __init__(self, kite, cmp_manager, session):
         self.kite = kite
         self.cmp_manager = cmp_manager
-        self.session = session  # ✅ Add session reference
+        self.session = session
+
+    def _parse_gtt(self, g: Dict) -> Dict:
+        """Parses a GTT object to extract key details into a flat dictionary."""
+        is_order_list = "orders" in g and isinstance(g["orders"], list)
+        order_data = g["orders"][0] if is_order_list else g
+
+        details = {
+            "transaction_type": order_data.get("transaction_type"),
+            "qty": order_data.get("quantity"),
+            "price": order_data.get("price"),
+            "symbol": g.get("tradingsymbol") or g.get("condition", {}).get("tradingsymbol"),
+            "exchange": g.get("exchange") or g.get("condition", {}).get("exchange"),
+            "id": g.get("id"),
+            "status": g.get("status"),
+        }
+
+        trigger_values = g.get("trigger_values") or g.get("condition", {}).get("trigger_values")
+        details["trigger"] = trigger_values[0] if trigger_values else None
+        
+        return details
+
+    def place_orders(self, gtt_plan: List[Dict], dry_run: bool = False) -> List[Dict]:
+        """
+        Places GTT orders based on the generated plan.
+        """
+        results = []
+        for order in gtt_plan:
+            if order.get("skip_reason"):
+                results.append({**order, "status": "Skipped", "remarks": order["skip_reason"]})
+                continue
+
+            symbol = order["symbol"]
+            result = {
+                "symbol": symbol,
+                "price": order["price"],
+                "trigger": order["trigger"],
+                "status": "Success",
+                "remarks": ""
+            }
+
+            if not dry_run:
+                try:
+                    self.kite.place_gtt(
+                        trigger_type=self.kite.GTT_TYPE_SINGLE,
+                        tradingsymbol=symbol,
+                        exchange=order["exchange"],
+                        trigger_values=[order["trigger"]],
+                        last_price=order["ltp"],
+                        orders=[
+                            {
+                                "transaction_type": self.kite.TRANSACTION_TYPE_BUY,
+                                "quantity": order["qty"],
+                                "order_type": self.kite.ORDER_TYPE_LIMIT,
+                                "product": self.kite.PRODUCT_CNC,
+                                "price": order["price"]
+                            }
+                        ]
+                    )
+                except Exception as e:
+                    result["status"] = "Fail"
+                    result["remarks"] = str(e)
+                    logging.error(f"[ERROR] ❌ Failed to place GTT for {symbol}: {e}")
+
+            results.append(result)
+
+        session.refresh_gtt_cache()
+        return results
 
     # ──────────────── GTT Analysis ──────────────── #
     def analyze_gtt_buy_orders(self) -> List[Dict]:
         try:
             gtts = session.get_gtt_cache()
             orders = []
-            seen_symbols = set()
 
             for g in gtts:
-                if "orders" in g and isinstance(g["orders"], list):
-                    order_data = g["orders"][0]
-                    transaction_type = order_data.get("transaction_type")
-                    qty = order_data.get("quantity")
-                else:
-                    transaction_type = g.get("transaction_type")
-                    qty = g.get("quantity")
-
-                if transaction_type != self.kite.TRANSACTION_TYPE_BUY:
+                details = self._parse_gtt(g)
+                
+                if details.get("status") != "active":
+                    continue
+                
+                if details.get("transaction_type") != self.kite.TRANSACTION_TYPE_BUY:
                     continue
 
-                symbol = g.get("tradingsymbol") or g.get("condition", {}).get(
-                    "tradingsymbol"
-                )
-                exchange = g.get("exchange") or g.get("condition", {}).get("exchange")
-                trigger_values = g.get("trigger_values") or g.get(
-                    "condition", {}
-                ).get("trigger_values")
-                trigger = trigger_values[0] if trigger_values else None
+                symbol = details.get("symbol")
+                exchange = details.get("exchange")
+                trigger = details.get("trigger")
 
                 if not symbol or not exchange or trigger is None:
                     continue
@@ -46,21 +105,22 @@ class GTTManager:
                     continue
 
                 variance = round(((ltp - trigger) / trigger) * 100, 2)
+                
+                qty = details.get("qty")
+                buy_amount = int(qty * ltp) if qty and ltp else 0
 
-                if symbol not in seen_symbols:
-                    orders.append(
-                        {
-                            "GTT ID": g.get("id"),
-                            "Symbol": symbol,
-                            "Exchange": exchange,
-                            "Trigger Price": trigger,
-                            "LTP": ltp,
-                            "Variance (%)": variance,
-                            "Qty": qty,
-                            "Buy Amount": int(qty * ltp),
-                        }
-                    )
-                    seen_symbols.add(symbol)
+                orders.append(
+                    {
+                        "GTT ID": details.get("id"),
+                        "Symbol": symbol,
+                        "Exchange": exchange,
+                        "Trigger Price": trigger,
+                        "LTP": ltp,
+                        "Variance (%)": variance,
+                        "Qty": qty,
+                        "Buy Amount": buy_amount,
+                    }
+                )
 
             return sorted(orders, key=lambda x: x["Variance (%)"])
 
@@ -71,14 +131,17 @@ class GTTManager:
     def get_duplicate_gtt_symbols(self) -> List[str]:
         try:
             gtts = session.get_gtt_cache()
-            symbol_count = {}
-
+            
+            active_buy_symbols = []
             for g in gtts:
-                symbol = g.get("tradingsymbol") or g.get("condition", {}).get("tradingsymbol")
-                if symbol:
-                    symbol_count[symbol] = symbol_count.get(symbol, 0) + 1
-
-            return [s for s, c in symbol_count.items() if c > 1]
+                details = self._parse_gtt(g)
+                if (details.get("status") == "active" and 
+                    details.get("transaction_type") == self.kite.TRANSACTION_TYPE_BUY and 
+                    details.get("symbol")):
+                    active_buy_symbols.append(details["symbol"])
+            
+            symbol_counts = Counter(active_buy_symbols)
+            return [symbol for symbol, count in symbol_counts.items() if count > 1]
 
         except Exception as e:
             logging.error(f"Error computing duplicate GTT symbols: {e}")
@@ -90,33 +153,32 @@ class GTTManager:
             total_amount = 0.0
 
             for g in gtts:
-                if "orders" in g and isinstance(g["orders"], list):
-                    order_data = g["orders"][0]
-                    transaction_type = order_data.get("transaction_type")
-                    qty = order_data.get("quantity")
-                    price = order_data.get("price")
-                else:
-                    transaction_type = g.get("transaction_type")
-                    qty = g.get("quantity")
-                    price = g.get("price")
+                details = self._parse_gtt(g)
 
-                if transaction_type != self.kite.TRANSACTION_TYPE_BUY or not price or not qty:
+                if details.get("status") != "active":
+                    continue
+                
+                if details.get("transaction_type") != self.kite.TRANSACTION_TYPE_BUY or not details.get("price") or not details.get("qty"):
                     continue
 
-                # Compute variance if threshold is provided
                 if threshold is not None:
-                    trigger_values = g.get("trigger_values") or g.get("condition", {}).get("trigger_values")
-                    trigger = trigger_values[0] if trigger_values else None
-                    ltp = self.cmp_manager.get_cmp(g.get("exchange"), g.get("tradingsymbol"))
+                    trigger = details.get("trigger")
+                    symbol = details.get("symbol")
+                    exchange = details.get("exchange")
+                    
+                    if trigger is None or exchange is None or symbol is None:
+                        continue
 
-                    if trigger is None or ltp is None:
+                    ltp = self.cmp_manager.get_cmp(exchange, symbol)
+
+                    if ltp is None:
                         continue
 
                     variance = round(((ltp - trigger) / trigger) * 100, 2)
                     if variance > threshold:
                         continue
 
-                total_amount += price * qty
+                total_amount += details["price"] * details["qty"]
 
             return round(total_amount, 2)
 
@@ -173,3 +235,32 @@ class GTTManager:
                     logging.warning(f"Failed to delete GTT for {order['Symbol']}: {e}")
         self.session.refresh_gtt_cache()  # ✅ Refresh GTT cache after deletion
         return deleted
+
+    def delete_gtts_for_symbols(self, symbols_to_delete: List[str]) -> List[str]:
+        deleted_symbols = []
+        try:
+            gtts = self.session.get_gtt_cache()
+            symbols_to_delete_set = set(symbols_to_delete)
+            
+            gtts_to_process = [g for g in gtts if self._parse_gtt(g).get("symbol") in symbols_to_delete_set]
+
+            for g in gtts_to_process:
+                details = self._parse_gtt(g)
+                symbol = details.get("symbol")
+                status = details.get("status")
+                gtt_id = details.get("id")
+
+                if status == "active":
+                    try:
+                        self.kite.delete_gtt(gtt_id)
+                        deleted_symbols.append(symbol)
+                        logging.info(f"✅ Deleted existing GTT for {symbol} (ID: {gtt_id})")
+                    except Exception as e:
+                        logging.warning(f"Failed to delete GTT for {symbol} (ID: {gtt_id}): {e}")
+
+            if deleted_symbols:
+                self.session.refresh_gtt_cache()
+                
+        except Exception as e:
+            logging.error(f"Error deleting GTTs for symbols: {e}")
+        return list(set(deleted_symbols))

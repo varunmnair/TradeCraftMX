@@ -65,13 +65,12 @@ def main_menu():
 
             # Step 2: Show dynamic averaging plan
             result = runner.invoke(app, ["plan-dynamic-avg"], catch_exceptions=False)
-            print("\n📉 Dynamic Averaging Buy Plan:")
             print(result.output)
             if result.exception:
                 print(f"❌ Exception occurred: {result.exception}")
 
             if input("\n1.2 Place dynamic averaging GTT orders? (y/n): ").lower() == "y":
-                result = runner.invoke(app, ["place-gtt-orders"], catch_exceptions=False)
+                result = runner.invoke(app, ["place-dynamic-averaging-orders"], catch_exceptions=False)
                 print(result.output)
                 if result.exception:
                     print(f"❌ Exception occurred: {result.exception}")

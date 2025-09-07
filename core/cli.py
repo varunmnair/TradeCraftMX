@@ -4,9 +4,8 @@ import os
 import logging
 import traceback
 
-
-from core.entry import EntryStrategyManager
-from core.gtt_buy import BuyOrderPlanner
+from core.entry import detect_duplicates
+from core.multilevel_entry import MultiLevelEntryStrategy
 from core.gtt_manage import GTTManager
 from core.holdings import HoldingsAnalyzer
 from core.utils import print_table
@@ -14,20 +13,16 @@ from core.utils import print_table
 app = typer.Typer()
 from core.session_singleton import shared_session as session
 
-entry_mgr = EntryStrategyManager()
 holdings_analyzer = HoldingsAnalyzer()
 GTT_PLAN_CACHE_PATH = "data/gtt_plan_cache.json"
 
 from core.utils import setup_logging
 setup_logging(logging.INFO)
 
-# ──────────────── Commands ──────────────── #
+app = typer.Typer()
+from core.session_singleton import shared_session as session
 
-@app.command()
-def update_tradebook():
-    """Update tradebook from Kite."""
-    session.refresh_all_caches()
-    holdings_analyzer.update_tradebook(session.kite)
+# ──────────────── Commands ──────────────── #
 
 @app.command()
 def write_roi():
@@ -41,7 +36,7 @@ def check_duplicates():
     """Check for duplicate symbols in entry levels."""
     session.refresh_all_caches()
     scrips = session.get_entry_levels()
-    duplicates = entry_mgr.detect_duplicates(scrips)
+    duplicates = detect_duplicates(scrips)
     if duplicates:
         print("\n⚠️ Duplicate entries found:")
         for symbol in duplicates:
@@ -51,54 +46,47 @@ def check_duplicates():
 
 @app.command()
 def list_entry_levels(filter_ltp: float = typer.Option(None, help="Filter orders with LTP greater than this value")):
-    """List GTT orders based on entry levels and CMP."""
+    """List GTT orders based on multi-level entry strategy."""
     try:
-        entry_levels = session.get_entry_levels()
-        duplicates = entry_mgr.detect_duplicates(entry_levels)
+        session.refresh_all_caches()
+        
+        duplicates = detect_duplicates(session.get_entry_levels())
         if duplicates:
             print("\n⚠️ Duplicate entries found in entry_levels.csv:")
             print("  " + ", ".join(duplicates))
         else:
             print("\n✅ No duplicate entries found in entry_levels.csv.")
 
-        planner = BuyOrderPlanner(session.kite, session.get_cmp_manager(), holdings=session.get_holdings())
-        new_orders = []
-        skipped_gtt = []
-        skipped_holding = []
-        planned_symbols = set()  # 🔁 Track processed symbols
+        # 1. Instantiate the planner with the new signature
+        planner = MultiLevelEntryStrategy(
+            kite=session.kite,
+            cmp_manager=session.get_cmp_manager(),
+            holdings=session.get_holdings(),
+            entry_levels=session.get_entry_levels(),
+            gtt_cache=session.get_gtt_cache()
+        )
 
-        for scrip in entry_levels:
-            try:
-                symbol = scrip.get("symbol", "").strip().upper()
-                if symbol in planned_symbols:
-                    continue  # ✅ Skip duplicate symbol
-                plan = planner.generate_plan(scrip)
+        # 2. Identify candidates and generate the plan
+        candidates = planner.identify_candidates()
+        new_orders = planner.generate_plan(candidates)
+        skipped_orders = planner.skipped_orders
 
-                for order in plan:
-                    if "skip_reason" in order:
-                        if order["skip_reason"] == "GTT already exists for symbol":
-                            skipped_gtt.append(symbol)
-                        elif order["skip_reason"] == "Holding exceeded allocated amount":
-                            skipped_holding.append(symbol)
-                    else:
-                        new_orders.append(order)
-                    planned_symbols.add(symbol)  # ✅ Mark symbol as processed
+        # 3. Display skipped orders
+        # if skipped_orders:
+        #     display_skipped = [{"Symbol": o["symbol"], "Skip Reason": o["skip_reason"]} for o in skipped_orders]
+        #     print_table(
+        #         sorted(display_skipped, key=lambda item: item['Symbol']),
+        #         ["Symbol", "Skip Reason"],
+        #         title="📌 Skipped Multi-Level Entry Symbols",
+        #         spacing=6
+        #     )
 
-            except Exception as e:
-                typer.echo(f"❌ Error generating plan for {symbol}: {e}")
-
-        if skipped_gtt:
-            print("\n📌 Skipped - GTT already exists:")
-            print("  " + ", ".join(skipped_gtt))
-
-        if skipped_holding:
-            print("\n📌 Skipped - Holding exceeded allocated amount:")
-            print("  " + ", ".join(skipped_holding))
-
+        # 4. Write plan to cache
         session.write_gtt_plan(new_orders)
 
+        # 5. Filter and display the plan
         if filter_ltp is not None:
-            new_orders = [o for o in new_orders if o["ltp"] > filter_ltp]
+            new_orders = [o for o in new_orders if o.get("ltp") and o["ltp"] > filter_ltp]
 
         if new_orders:
             display_orders = []
@@ -114,16 +102,19 @@ def list_entry_levels(filter_ltp: float = typer.Option(None, help="Filter orders
                 })
 
             print_table(
-                display_orders,
+                sorted(display_orders, key=lambda item: item['Symbol']),
                 ["Symbol", "Order Price", "Trigger Price", "LTP", "Order Amount", "Entry Level"],
-                title="📊 New GTT Plan - Entry Level Strategy",
+                title="📊 New GTT Plan - Multi-Level Entry Strategy",
                 spacing=6
             )
         else:
-            print("\nℹ️ No new GTT plans to display.")
+            print("\nℹ️  No Multi-Level Entry plans to display.")
 
     except Exception as e:
         typer.echo(f"❌ Exception in list_entry_levels: {e}")
+        traceback.print_exc()
+
+
 
 @app.command()
 def place_gtt_orders():
@@ -135,20 +126,15 @@ def place_gtt_orders():
         print("⚠️ No GTT orders found in cache.")
         return
 
-    planner = BuyOrderPlanner(
-        session.kite,
-        session.get_cmp_manager(),
-        holdings=session.get_holdings(),
-        session=session
-    )
+    manager = GTTManager(session.kite, session.get_cmp_manager(), session)
 
     print("\n📦 Placing GTT orders...")
 
     try:
-        placed_orders = planner.place_orders(new_orders, dry_run=False)
+        placed_orders = manager.place_orders(new_orders, dry_run=False)
         print_table(
             placed_orders,
-            ["symbol", "price", "trigger", "status", "remarks"],
+            ["symbol", "price", "trigger", "status"],
             title="✅ GTT Order Placement Summary",
             spacing=6
         )
@@ -162,25 +148,74 @@ def place_gtt_orders():
     except Exception as e:
         print(f"⚠️ Failed to delete cache file: {e}")
 
-# @app.command()
-# def analyze_gtt_variance(threshold: float = typer.Option(..., help="Variance threshold to filter GTTs")):
-#     """Analyze GTT orders below variance threshold."""
-#     session.refresh_all_caches()
-#     manager = GTTManager(session.kite, session.get_cmp_manager(), session)
-#     result = manager.analyze_orders()
-#     filtered = [o for o in result["orders"] if o["Variance (%)"] < threshold]
-#     print_table(filtered, ["Symbol", "Trigger Price", "LTP", "Variance (%)"], title="📉 GTT Orders Below Threshold")
+@app.command()
+def place_dynamic_averaging_orders():
+    """Place GTT orders from cached dynamic averaging plan, deleting existing GTTs for symbols in the plan."""
+    session.refresh_all_caches()
+    new_orders = session.read_gtt_plan()  # Assuming plan_dynamic_avg writes to the same cache as list_entry_levels
+
+    if not new_orders:
+        print("⚠️ No dynamic averaging GTT orders found in cache.")
+        return
+
+    manager = GTTManager(session.kite, session.get_cmp_manager(), session)
+
+    # --- Deletion Logic ---
+    new_plan_symbols = {order["symbol"] for order in new_orders}
+    if new_plan_symbols:
+        all_gtts = session.get_gtt_cache()
+        
+        symbols_to_delete = []
+        for g in all_gtts:
+            if g.get("status", "").lower() == "active":
+                symbol = g.get("tradingsymbol") or g.get("condition", {}).get("tradingsymbol")
+                if symbol in new_plan_symbols:
+                    symbols_to_delete.append(symbol)
+        
+        symbols_to_delete = list(set(symbols_to_delete))
+
+        if symbols_to_delete:
+            logging.info(f"Attempting to delete existing GTTs for symbols in dynamic averaging plan: {symbols_to_delete}")
+            deleted_gtt_symbols = manager.delete_gtts_for_symbols(symbols_to_delete)
+            if deleted_gtt_symbols:
+                print(f"Successfully deleted existing GTTs for: {', '.join(deleted_gtt_symbols)}")
+            else:
+                print("No existing GTTs found to delete for the dynamic averaging plan symbols.")
+        else:
+            print("No active, non-triggered GTTs found for symbols in the new plan. Nothing to delete.")
+    # --- End Deletion Logic ---
+
+    print("\n📦 Placing dynamic averaging GTT orders...")
+
+    try:
+        placed_orders = manager.place_orders(new_orders, dry_run=False)
+        print_table(
+            placed_orders,
+            ["symbol", "price", "trigger", "status"],
+            title="✅ Dynamic Averaging GTT Order Placement Summary",
+            spacing=6
+        )
+    except Exception as e:
+        print(f"❌ Failed to place dynamic averaging GTT orders: {e}")
+        traceback.print_exc()
+        logging.error(f"[ERROR] ❌ Failed to place dynamic averaging GTT orders: {e}")
+
+    try:
+        session.delete_gtt_plan()  # Clear the cache after placing orders
+    except Exception as e:
+        print(f"⚠️ Failed to delete cache file: {e}")
+
 
 @app.command()
 def adjust_gtt_orders(target_variance: float = typer.Option(..., help="Target variance to adjust GTTs")):
     """Adjust GTT orders to match target variance."""
     session.refresh_all_caches()
     manager = GTTManager(session.kite, session.get_cmp_manager(), session)
-    planner = BuyOrderPlanner(session.kite, session.get_cmp_manager(), holdings=session.get_holdings())
     orders = manager.analyze_gtt_buy_orders()
     to_adjust = [o for o in orders if o["Variance (%)"] < target_variance]
 
-    adjusted_symbols = manager.adjust_orders(to_adjust, target_variance, planner.adjust_trigger_and_order_price)
+    from core.entry import BaseEntryStrategy
+    adjusted_symbols = manager.adjust_orders(to_adjust, target_variance, BaseEntryStrategy.adjust_trigger_and_order_price)
     print_table(adjusted_symbols, ["Symbol", "Trigger Price", "LTP", "Variance (%)"], title="📉 GTT Orders Adjusted")
 
 @app.command()
@@ -292,16 +327,32 @@ def plan_dynamic_avg():
     candidates = planner.identify_candidates()
     plan = planner.generate_buy_plan(candidates)
 
-    print_table(
-        plan,
-        ["symbol", "exchange", "price", "trigger", "qty", "ltp", "strategy", "leg", "entry"],
-        title="📉 Dynamic Averaging Buy Plan",
-        spacing=6
-    )
+    display_plan = []
+    for order in plan:
+        display_plan.append({
+            "Symbol": order["symbol"],
+            "Order Price": order["price"],
+            "Trigger Price": order["trigger"],
+            "LTP": order["ltp"],
+            "Order Amt": round(order["qty"] * order["price"], 2),
+            "DA Leg": order["leg"],
+            "Entry Level": order["entry"],
+        })
+
+    if display_plan:
+        print_table(
+            sorted(display_plan, key=lambda item: item['Symbol']),
+            ["Symbol", "Order Price", "Trigger Price", "LTP", "Order Amt",  "DA Leg", "Entry Level"],
+            title="📉 Dynamic Averaging Buy Plan",
+            spacing=6
+        )
+    else:
+        print("\nℹ️ No Dynamic Averaging buy plan to display.")
+
 
     # if hasattr(planner, "skipped_symbols") and planner.skipped_symbols:
     #     print_table(
-    #         planner.skipped_symbols,
+    #         sorted(planner.skipped_symbols, key=lambda item: item['symbol']),
     #         ["symbol", "skip_reason"],
     #         title="⏭️ Skipped Symbols",
     #         spacing=6
