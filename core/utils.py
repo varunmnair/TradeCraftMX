@@ -63,3 +63,26 @@ def read_csv(file_path: str) -> List[Dict]:
     except Exception as e:
         logging.error(f"Failed to read CSV: {e}")
         return []
+
+def write_csv(file_path: str, data: List[Dict]):
+    try:
+        df = pd.DataFrame.from_records(data)
+        df.to_csv(file_path, index=False)
+    except Exception as e:
+        logging.error(f"Failed to write to CSV: {e}")
+
+def get_trade_from_tradebook(trade_id: str, tradebook: List[Dict]) -> Dict:
+    """
+    Retrieves a trade from the tradebook by its ID.
+
+    Args:
+        trade_id (str): The ID of the trade to retrieve.
+        tradebook (List[Dict]): The tradebook to search.
+
+    Returns:
+        Dict: The trade with the matching ID, or None if not found.
+    """
+    for trade in tradebook:
+        if trade.get("trade_id") == trade_id:
+            return trade
+    return None

@@ -6,10 +6,10 @@ from abc import ABC, abstractmethod
 from core.session_singleton import shared_session as session
 
 class BaseEntryStrategy(ABC):
-    def __init__(self, kite, cmp_manager, holdings=None):
-        self.kite = kite
+    def __init__(self, broker, cmp_manager, holdings=None):
+        self.broker = broker
         self.cmp_manager = cmp_manager
-        self.holdings = holdings if holdings is not None else session.kite.holdings()
+        self.holdings = holdings if holdings is not None else self.broker.get_holdings()
 
     @abstractmethod
     def generate_plan(self, scrip: Dict) -> List[Dict]:

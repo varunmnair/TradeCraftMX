@@ -7,13 +7,15 @@ from typing import List, Dict
 from core.utils import read_csv
 
 class HoldingsAnalyzer:
-    def __init__(self, tradebook_path="data/zerodha-tradebook-master.csv", roi_path="data/roi-master.csv", entry_levels_path="data/entry_levels.csv"):
-        self.tradebook_path = tradebook_path
-        self.roi_path = roi_path
-        self.entry_levels_path = entry_levels_path
+    def __init__(self, user_id: str, broker_name: str):
+        self.user_id = user_id
+        self.broker_name = broker_name
+        self.tradebook_path = f"data/{user_id}-{broker_name}-tradebook.csv"
+        self.roi_path = f"data/{user_id}-{broker_name}-roi-data.csv"
+        self.entry_levels_path = f"data/{user_id}-{broker_name}-entry-levels.csv"
 
     # ──────────────── Tradebook Update ──────────────── #
-    def update_tradebook(self, kite) -> dict:
+    def update_tradebook(self, broker) -> dict:
         result_summary = {
             "total_records_fetched": 0,
             "records_uploaded": 0,
@@ -22,7 +24,7 @@ class HoldingsAnalyzer:
         }
 
         try:
-            new_trades = kite.trades()
+            new_trades = broker.trades()
             new_df = pd.DataFrame(new_trades)
             result_summary["total_records_fetched"] = len(new_df)
 
@@ -68,7 +70,7 @@ class HoldingsAnalyzer:
                 updated_df = pd.concat([existing_df, new_df], ignore_index=True)
                 updated_df.to_csv(self.tradebook_path, index=False)
                 result_summary["records_uploaded"] = len(new_df)
-                logging.info(f"Appended {len(new_df)} new trades to the tradebook.")
+                logging.info(f"Appended {len(new_df)} new trades to the tradebook: {self.tradebook_path}")
             else:
                 logging.info("No new trades to append.")
 
@@ -81,6 +83,7 @@ class HoldingsAnalyzer:
 
     # ──────────────── ROI Writer ──────────────── #
     def write_roi_results(self, results: List[Dict]):
+        logging.debug(f"Received {len(results)} results to write to ROI file.")
         os.makedirs(os.path.dirname(self.roi_path), exist_ok=True)
         today = datetime.today()
         if today.weekday() in (5, 6):
@@ -108,15 +111,19 @@ class HoldingsAnalyzer:
             "Yield Per Day", "Age of Stock", "Profit Percentage", "ROI per day"
         ]
         df_new = df_new.reindex(columns=output_columns)
+        logging.info(f"New records to be added: {len(df_new)}")
 
 
         if os.path.exists(self.roi_path):
             df_existing = pd.read_csv(self.roi_path)
+            logging.debug(f"Loaded {len(df_existing)} existing records from {self.roi_path}")
         else:
             df_existing = pd.DataFrame(columns=output_columns)
+            logging.debug(f"ROI file not found at {self.roi_path}. Creating a new one.")
 
         # Combine the dataframes
         df_combined = pd.concat([df_existing, df_new], ignore_index=True)
+        logging.debug(f"Total records after combining: {len(df_combined)}")
 
         # Clean up and standardize before dropping duplicates
         df_combined["Date"] = pd.to_datetime(df_combined["Date"], errors='coerce').dt.strftime("%Y-%m-%d")
@@ -124,6 +131,7 @@ class HoldingsAnalyzer:
 
         # Drop duplicates, keeping the last (most recent) entry
         df_combined.drop_duplicates(subset=["Date", "Symbol"], keep="last", inplace=True)
+        logging.debug(f"Records after dropping duplicates: {len(df_combined)}")
         
         df_combined.to_csv(self.roi_path, index=False)
         logging.info(f"ROI results written to {self.roi_path}")
@@ -202,7 +210,8 @@ class HoldingsAnalyzer:
     def get_total_invested(self, holdings: List[Dict]) -> float:
         return sum(h["quantity"] * h["average_price"] for h in holdings if h["quantity"] > 0 and h["average_price"] > 0)
 
-    def analyze_holdings(self, kite, cmp_manager, filters=None, sort_by="ROI/Day") -> List[Dict]:
+    def analyze_holdings(self, broker, cmp_manager, filters=None, sort_by="ROI/Day") -> List[Dict]:
+        logging.debug("Analyzing holdings...")
         if filters is None:
             filters = {}
 
@@ -214,7 +223,8 @@ class HoldingsAnalyzer:
         trades_df["trade_date"] = pd.to_datetime(trades_df["trade_date"], errors='coerce')
         trades_df = trades_df[trades_df["trade_type"].str.lower() == "buy"]
 
-        holdings = kite.holdings()
+        holdings = broker.get_holdings()
+        logging.debug(f"Found {len(holdings)} holdings.")
         results = []
         total_invested = self.get_total_invested(holdings)
 
@@ -230,6 +240,7 @@ class HoldingsAnalyzer:
             if not ltp:
                 ltp = cmp_manager.get_cmp(holding.get("exchange", "NSE"), symbol)
             if not ltp:
+                logging.warning(f"LTP not found for {symbol}. Skipping.")
                 continue
 
             current_value = quantity * ltp
@@ -283,13 +294,15 @@ class HoldingsAnalyzer:
                 "Quality": quality
             })
 
-
+        logging.debug(f"Generated {len(results)} results before filtering.")
         results = self.apply_filters(results, filters)
+        logging.debug(f"Found {len(results)} results after applying filters.")
         
         sort_key_mapping = {"roi_per_day": "ROI/Day", "weighted_roi": "W ROI"}
         sort_key = sort_key_mapping.get(sort_by, sort_by)
 
         sorted_results = sorted(results, key=lambda x: x.get(sort_key, 0), reverse=True)
+        logging.debug(f"Sorted results by {sort_key}.")
         
         self.write_roi_results(sorted_results)
         

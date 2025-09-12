@@ -1,22 +1,29 @@
 # menu_cli.py
 from typer.testing import CliRunner
-from core.cli import app
+from core.cli import app, set_current_session # Added set_current_session
 import os
 import logging
+import argparse
 from core.utils import setup_logging
-from core.session_singleton import shared_session as session
-
-from core.session_singleton import shared_session as session
+from core.session import SessionCache # Changed from session_singleton
+from core.session_manager import SessionManager
 from core.holdings import HoldingsAnalyzer
+from brokers.broker_factory import BrokerFactory
 
-
-setup_logging(logging.INFO)
+parser = argparse.ArgumentParser(description='TradeCraftX CLI')
+parser.add_argument(
+    '--log-level',
+    default='INFO',
+    choices=['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
+    help='Set the logging level (default: INFO)'
+)
+args = parser.parse_args()
+setup_logging(args.log_level.upper())
 runner = CliRunner()
 
 from core.cli import list_duplicate_gtt_symbols, show_total_buy_gtt_amount
 
 def menu_gtt_summary():
-    
     duplicates = list_duplicate_gtt_symbols()
     if duplicates:
         print("\n🔁 Duplicate GTT Symbols:")
@@ -29,17 +36,48 @@ def menu_gtt_summary():
     total_amount = show_total_buy_gtt_amount(threshold)
     print(f"💰 Total Buy GTT Amount Required (variance ≤ {threshold}%): ₹{total_amount}")
 
-
 def main_menu():
-    #session.refresh_all_caches()  # ✅ Initial cache refresh
+    print("Please select a broker:")
+    print("1. Zerodha (default)")
+    print("2. Upstox")
+    broker_choice = input("Enter your choice (1 or 2): ").strip()
+
+    session_manager = SessionManager()
+    session = SessionCache(session_manager=session_manager) # Initialize SessionCache here
+    set_current_session(session) # Set the global session in core.cli
+    config = {}
+
+    if broker_choice == '2':
+        broker_name = 'upstox'
+        config['api_key'] = session_manager.upstox_api_key
+        config['api_secret'] = session_manager.upstox_api_secret
+        config['redirect_uri'] = session_manager.upstox_redirect_uri
+        # For Upstox, the 'code' is part of the login flow, handled by get_valid_upstox_access_token
+        config['access_token'] = session_manager.get_valid_upstox_access_token()
+        us = "32ADGT"
+    else:
+        broker_name = 'zerodha'
+        config['api_key'] = session_manager.kite_api_key
+        config['access_token'] = session_manager.get_valid_kite_access_token()
+        us = "NM9165"
+
+    user_id = input(f"Enter User ID for {broker_name} (default: {us}): ").strip() or us
+         
+    try:
+        session.broker = BrokerFactory.get_broker(broker_name, user_id, config)
+        session.broker.login()
+    except Exception as e:
+        print(f"❌ Failed to initialize broker: {e}")
+        return
+
     print("🔄 Refreshing all caches...")
+    session.refresh_all_caches()
 
     print("🔄 Initializing application and uploading trades...")
-    summary = HoldingsAnalyzer().update_tradebook(session.kite)
+    summary = HoldingsAnalyzer(user_id, broker_name).update_tradebook(session.broker)
     summary_str = " - ".join([f"{key.replace('_', ' ').capitalize()}: {value}" for key, value in summary.items()])
     print(f"\n📊 Tradebook Upload Summary: {summary_str}")
 
-    
     while True:
         print("\n📋 Menu:")
         print("1. List GTT orders")
@@ -51,7 +89,6 @@ def main_menu():
         choice = input("Enter your choice: ").strip()
 
         if choice == "1":
-            # Step 1: List entry-level GTTs
             result = runner.invoke(app, ["list-entry-levels"], catch_exceptions=False)
             print(result.output)
             if result.exception:
@@ -63,7 +100,6 @@ def main_menu():
                 if result.exception:
                     print(f"❌ Exception occurred: {result.exception}")
 
-            # Step 2: Show dynamic averaging plan
             result = runner.invoke(app, ["plan-dynamic-avg"], catch_exceptions=False)
             print(result.output)
             if result.exception:
@@ -75,20 +111,12 @@ def main_menu():
                 if result.exception:
                     print(f"❌ Exception occurred: {result.exception}")
 
-
         elif choice == "2":
             print("\n📉 GTT Orders Below Threshold:")
             result = runner.invoke(app, ["analyze-gtt-variance", "--threshold", "100.0"], catch_exceptions=False)
             print(result.output)
 
             menu_gtt_summary()
-
-            # result = runner.invoke(app, ["list-duplicate-gtt-symbols"], catch_exceptions=False)
-            # print(result.output)
-
-            # result = runner.invoke(app, ["show-total-buy-gtt-amount"], catch_exceptions=False)
-            # print(result.output)
-
 
             print("\n📌 Sub-options:")
             print("1. Delete GTTs with variance greater than a custom threshold")
@@ -143,7 +171,6 @@ def main_menu():
                         sort_args = args + ["--sort-by", sort_key]
                         result = runner.invoke(app, sort_args, catch_exceptions=False)
                         print(result.output)
-
 
             except Exception as e:
                 print(f"❌ Error analyzing holdings: {e}")

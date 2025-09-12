@@ -1,12 +1,10 @@
 import logging
 from typing import List, Dict, Callable
 from collections import Counter
-from core.session_singleton import shared_session as session
-
 
 class GTTManager:
-    def __init__(self, kite, cmp_manager, session):
-        self.kite = kite
+    def __init__(self, broker, cmp_manager, session):
+        self.broker = broker
         self.cmp_manager = cmp_manager
         self.session = session
 
@@ -51,18 +49,18 @@ class GTTManager:
 
             if not dry_run:
                 try:
-                    self.kite.place_gtt(
-                        trigger_type=self.kite.GTT_TYPE_SINGLE,
+                    self.broker.place_gtt(
+                        trigger_type=self.broker.GTT_TYPE_SINGLE,
                         tradingsymbol=symbol,
                         exchange=order["exchange"],
                         trigger_values=[order["trigger"]],
                         last_price=order["ltp"],
                         orders=[
                             {
-                                "transaction_type": self.kite.TRANSACTION_TYPE_BUY,
+                                "transaction_type": self.broker.TRANSACTION_TYPE_BUY,
                                 "quantity": order["qty"],
-                                "order_type": self.kite.ORDER_TYPE_LIMIT,
-                                "product": self.kite.PRODUCT_CNC,
+                                "order_type": self.broker.ORDER_TYPE_LIMIT,
+                                "product": self.broker.PRODUCT_CNC,
                                 "price": order["price"]
                             }
                         ]
@@ -74,13 +72,13 @@ class GTTManager:
 
             results.append(result)
 
-        session.refresh_gtt_cache()
+        self.session.refresh_gtt_cache()
         return results
 
     # ──────────────── GTT Analysis ──────────────── #
     def analyze_gtt_buy_orders(self) -> List[Dict]:
         try:
-            gtts = session.get_gtt_cache()
+            gtts = self.session.get_gtt_cache()
             orders = []
 
             for g in gtts:
@@ -89,7 +87,7 @@ class GTTManager:
                 if details.get("status") != "active":
                     continue
                 
-                if details.get("transaction_type") != self.kite.TRANSACTION_TYPE_BUY:
+                if details.get("transaction_type") != self.broker.TRANSACTION_TYPE_BUY:
                     continue
 
                 symbol = details.get("symbol")
@@ -130,13 +128,13 @@ class GTTManager:
         
     def get_duplicate_gtt_symbols(self) -> List[str]:
         try:
-            gtts = session.get_gtt_cache()
+            gtts = self.session.get_gtt_cache()
             
             active_buy_symbols = []
             for g in gtts:
                 details = self._parse_gtt(g)
                 if (details.get("status") == "active" and 
-                    details.get("transaction_type") == self.kite.TRANSACTION_TYPE_BUY and 
+                    details.get("transaction_type") == self.broker.TRANSACTION_TYPE_BUY and 
                     details.get("symbol")):
                     active_buy_symbols.append(details["symbol"])
             
@@ -149,7 +147,7 @@ class GTTManager:
 
     def get_total_buy_gtt_amount(self, threshold: float = None) -> float:
         try:
-            gtts = session.get_gtt_cache()
+            gtts = self.session.get_gtt_cache()
             total_amount = 0.0
 
             for g in gtts:
@@ -158,7 +156,7 @@ class GTTManager:
                 if details.get("status") != "active":
                     continue
                 
-                if details.get("transaction_type") != self.kite.TRANSACTION_TYPE_BUY or not details.get("price") or not details.get("qty"):
+                if details.get("transaction_type") != self.broker.TRANSACTION_TYPE_BUY or not details.get("price") or not details.get("qty"):
                     continue
 
                 if threshold is not None:
@@ -196,18 +194,18 @@ class GTTManager:
                     new_trigger = round(order["LTP"] / (1 + target_variance / 100), 2)
                     new_price, new_trigger = adjust_fn(order_price=new_trigger, ltp=order["LTP"])
 
-                    self.kite.delete_gtt(order["GTT ID"])
-                    self.kite.place_gtt(
-                        trigger_type=self.kite.GTT_TYPE_SINGLE,
+                    self.broker.cancel_gtt(order["GTT ID"])
+                    self.broker.place_gtt(
+                        trigger_type=self.broker.GTT_TYPE_SINGLE,
                         tradingsymbol=order["Symbol"],
                         exchange=order["Exchange"],
                         trigger_values=[new_trigger],
                         last_price=order["LTP"],
                         orders=[{
-                            "transaction_type": self.kite.TRANSACTION_TYPE_BUY,
+                            "transaction_type": self.broker.TRANSACTION_TYPE_BUY,
                             "quantity": order["Qty"],
-                            "order_type": self.kite.ORDER_TYPE_LIMIT,
-                            "product": self.kite.PRODUCT_CNC,
+                            "order_type": self.broker.ORDER_TYPE_LIMIT,
+                            "product": self.broker.PRODUCT_CNC,
                             "price": new_price
                         }]
                     )
@@ -229,7 +227,7 @@ class GTTManager:
         for order in orders:
             if order["Variance (%)"] > threshold:
                 try:
-                    self.kite.delete_gtt(order["GTT ID"])
+                    self.broker.cancel_gtt(order["GTT ID"])
                     deleted.append(order["Symbol"])
                 except Exception as e:
                     logging.warning(f"Failed to delete GTT for {order['Symbol']}: {e}")
@@ -252,9 +250,9 @@ class GTTManager:
 
                 if status == "active":
                     try:
-                        self.kite.delete_gtt(gtt_id)
+                        self.broker.cancel_gtt(gtt_id)
                         deleted_symbols.append(symbol)
-                        logging.info(f"✅ Deleted existing GTT for {symbol} (ID: {gtt_id})")
+                        logging.debug(f"✅ Deleted existing GTT for {symbol} (ID: {gtt_id})")
                     except Exception as e:
                         logging.warning(f"Failed to delete GTT for {symbol} (ID: {gtt_id}): {e}")
 

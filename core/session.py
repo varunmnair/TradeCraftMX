@@ -4,75 +4,59 @@ import time
 import json
 import os
 import logging
-from core.broker import BrokerSession
 from core.cmp import CMPManager
 from core.utils import read_csv
+
 
 class SessionCache:
     GTT_PLAN_CACHE_PATH = "data/gtt_plan_cache.json"
 
-    def __init__(self, ttl: int = 300):
+    def __init__(self, session_manager, ttl: int = 300):
         self.ttl = ttl
         self.last_refreshed = 0
-        self.broker = BrokerSession()
-        self.kite = self.broker.get_kite_session()
+        self.broker = None # Will be set from main_menu
+        self.session_manager = session_manager # Store the session manager
         self.holdings = []
         self.entry_levels = []
         self.gtt_symbols = set()
-        self.cmp_manager = CMPManager(csv_path="data/Name-symbol-mapping.csv", ttl=ttl)
-        self.refresh_all_caches()
+        self.cmp_manager = None # Initialize lazily
+        self.gtt_cache = []
 
     def is_stale(self) -> bool:
         return (time.time() - self.last_refreshed) > self.ttl
 
     def refresh_all_caches(self):
+        if not self.broker:
+            print("Broker not initialized. Please login first.")
+            return
+        
+        if not self.cmp_manager:
+            self.cmp_manager = CMPManager(csv_path="data/Name-symbol-mapping.csv", broker=self.broker, session_manager=self.session_manager, ttl=self.ttl)
+
         #print("🔄 Refreshing all caches...")
         self.refresh_holdings()
-
         self.refresh_entry_levels()
-
         self.refresh_gtt_cache()
-        # print("📂 holding: ")
-        # print(self.holdings)
-        # print("📂 Entry level: ")
-        # print(self.entry_levels)
-        # print("📂 GTT: ")
-        # print(self.gtt_cache)
         self.refresh_cmp_cache()
         self.last_refreshed = time.time()
 
     def refresh_holdings(self):
-        self.holdings = self.kite.holdings()
+        self.holdings = self.broker.get_holdings()
 
     def refresh_entry_levels(self):
-        self.entry_levels = read_csv("data/entry_levels.csv")
+        # Assuming entry levels are broker specific
+        self.entry_levels = self.broker.load_entry_levels(f"data/{self.broker.user_id}-{self.broker.broker_name}-entry-levels.csv")
 
     def refresh_gtt_cache(self):
         try:
-            gtts = self.kite.get_gtts()
-            self.gtt_cache = []
-            for g in gtts:
-                    self.gtt_cache.append({
-                        'id': g.get('id'),
-                        'created_at': g.get('created_at'),
-                        'instrument_token': g.get('condition', {}).get('instrument_token'),
-                        'tradingsymbol': g.get('condition', {}).get('tradingsymbol'),
-                        'exchange': g.get('condition', {}).get('exchange'),
-                        'trigger_values': g.get('condition', {}).get('trigger_values'),
-                        'quantity': g.get('orders', [{}])[0].get('quantity'),
-                        'transaction_type': g.get('orders', [{}])[0].get('transaction_type'),
-                        'price': g.get('orders', [{}])[0].get('price'),
-                        'status': g.get('status'),
-                        'type': g.get('type')
-                    })
+            self.gtt_cache = self.broker.get_gtt_orders()
         except Exception as e:
             print(f"❌ Failed to refresh GTT cache: {e}")
             self.gtt_cache = []
 
 
     def refresh_cmp_cache(self):
-            gtts = self.kite.get_gtts()
-            self.cmp_manager.refresh_cache(self.holdings, gtts, self.entry_levels)
+            self.cmp_manager.refresh_cache(self.holdings, self.gtt_cache, self.entry_levels)
 
     def get_gtt_cache(self):
         if self.is_stale():
@@ -83,9 +67,9 @@ class SessionCache:
         if self.is_stale():
             self.refresh_all_caches()
         return {
-            g["tradingsymbol"].strip().upper()
+            g.tradingsymbol.strip().upper()
             for g in self.gtt_cache
-            if g["transaction_type"] == self.kite.TRANSACTION_TYPE_BUY
+            if g.transaction_type == self.broker.TRANSACTION_TYPE_BUY
         }
 
     

@@ -1,18 +1,18 @@
 import logging
 import math
 from typing import List, Dict
-from core.session_singleton import shared_session as session
 from core.multilevel_entry import MultiLevelEntryStrategy
 from core.utils import print_table
 
 class DynamicAveragingPlanner:
-    def __init__(self, trigger_offset_factor=0.3):
-        self.kite = session.kite
-        self.cmp_manager = session.get_cmp_manager()
-        self.holdings = session.get_holdings()
-        self.entry_levels = session.get_entry_levels()
-        self.gtt_cache = session.get_gtt_cache()
-        self.planner = MultiLevelEntryStrategy(self.kite, self.cmp_manager, self.holdings, self.entry_levels, self.gtt_cache)
+    def __init__(self, session, trigger_offset_factor=0.3):
+        self.session = session
+        self.broker = self.session.broker
+        self.cmp_manager = self.session.get_cmp_manager()
+        self.holdings = self.session.get_holdings()
+        self.entry_levels = self.session.get_entry_levels()
+        self.gtt_cache = self.session.get_gtt_cache()
+        self.planner = MultiLevelEntryStrategy(self.broker, self.cmp_manager, self.holdings, self.entry_levels, self.gtt_cache)
         self.skipped_symbols = []
         self.trigger_offset_factor = trigger_offset_factor
 

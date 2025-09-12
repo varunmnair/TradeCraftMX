@@ -3,16 +3,17 @@ import time
 import logging
 import requests
 import pandas as pd
-from core.broker import BrokerSession
+
 from core.utils import read_csv
 
 class CMPManager:
-    def __init__(self, csv_path: str, ttl: int = 600):
+    def __init__(self, csv_path: str, broker, session_manager, ttl: int = 600):
         self.csv_path = csv_path
         self.cache = {}
         self.last_updated = 0
         self.ttl = ttl
-        self.broker = BrokerSession()
+        self.broker = broker  # The active broker instance (ZerodhaBroker or UpstoxBroker)
+        self.session_manager = session_manager # The SessionManager instance for token handling
 
     # ──────────────── Cache Validity ──────────────── #
     def _is_cache_valid(self):
@@ -22,13 +23,16 @@ class CMPManager:
     def _collect_symbols(self, holdings, gtts, entry_levels):
         symbols = set()
         for h in holdings:
-            symbols.add((h["exchange"], h["tradingsymbol"].replace("#", "")))
+            if isinstance(h, dict):
+                symbols.add((h["exchange"], h["tradingsymbol"].replace("#", "")))
+            else:
+                symbols.add((h.exchange, h.tradingsymbol.replace("#", "")))
         for g in gtts:
             if g["orders"][0]["transaction_type"] == "BUY":
                 symbols.add((g["condition"]["exchange"], g["condition"]["tradingsymbol"]))
         for s in entry_levels:
             symbols.add((s["exchange"], s["symbol"]))
-        logging.debug(f"Collected symbols for CMP fetch: {symbols}")
+        logging.debug("Collected symbols for CMP fetch: ")
         return list(symbols)
 
     # ──────────────── Instrument Key Mapping ──────────────── #
@@ -61,7 +65,7 @@ class CMPManager:
         return requests.get(url, headers=headers, params=params)
 
     def _fetch_bulk_quote_upstox(self, symbols):
-        token = self.broker.get_valid_upstox_access_token()
+        token = self.session_manager.get_valid_upstox_access_token()
         instrument_keys = []
         symbol_map = {}
 
@@ -93,7 +97,7 @@ class CMPManager:
                     error_code = error_data.get("errors", [{}])[0].get("errorCode")
                     if error_code == "UDAPI100050":
                         logging.info("Invalid Upstox token detected. Regenerating token...")
-                        token = self.broker.generate_new_upstox_token()
+                        token = self.session_manager.generate_new_upstox_token()
                         response = self._fetch_quotes(token, batch_keys)
                 except Exception as e:
                     logging.error(f"Error while handling token regeneration: {e}")
@@ -110,20 +114,19 @@ class CMPManager:
                     quote_map[(exch, sym)] = quote
                     #logging.debug(f"✅ Added to cache: {sym} ({exch}) -> CMP: {quote.get('last_price')}")
 
-        logging.info(f"Fetched quotes for {len(quote_map)} symbols")
+        logging.debug(f"Fetched quotes for {len(quote_map)} symbols")
         return quote_map
 
     # ──────────────── Cache Refresh ──────────────── #
     def refresh_cache(self, holdings=None, gtts=None, entry_levels=None):
         if holdings is None or gtts is None or entry_levels is None:
-            kite = self.broker.get_kite_session()
-            holdings = kite.holdings()
-            gtts = kite.get_gtts()
+            holdings = self.broker.get_holdings()
+            gtts = self.broker.get_gtt_orders()
             entry_levels = read_csv("data/entry_levels.csv")
         symbols = self._collect_symbols(holdings, gtts, entry_levels)
         self.cache = self._fetch_bulk_quote_upstox(symbols)
         self.last_updated = time.time()
-        logging.info(f"CMP cache refreshed with {len(self.cache)} symbols.")
+        logging.debug(f"CMP cache refreshed with {len(self.cache)} symbols.")
 
     # ──────────────── CMP Access ──────────────── #
     def get_quote(self, exchange, symbol):
