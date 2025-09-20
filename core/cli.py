@@ -25,7 +25,7 @@ def get_holdings_analyzer():
                 broker = current_session.broker
                 has_user_id = hasattr(broker, 'user_id')
                 has_broker_name = hasattr(broker, 'broker_name')
-                logging.info(f"get_holdings_analyzer: broker has user_id: {has_user_id}, broker_name: {has_broker_name}")
+                logging.debug(f"get_holdings_analyzer: broker has user_id: {has_user_id}, broker_name: {has_broker_name}")
                 if has_user_id and has_broker_name:
                     return HoldingsAnalyzer(broker.user_id, broker.broker_name)
     logging.info("get_holdings_analyzer: returning None")
@@ -138,7 +138,7 @@ def place_gtt_orders():
     new_orders = current_session.read_gtt_plan()
 
     if not new_orders:
-        print("⚠️ No GTT orders found in cache.")
+        logging.debug("No GTT orders found in cache.")
         return
 
     manager = GTTManager(current_session.broker, current_session.get_cmp_manager(), current_session)
@@ -179,18 +179,17 @@ def place_dynamic_averaging_orders():
     new_plan_symbols = {order["symbol"] for order in new_orders}
     if new_plan_symbols:
         all_gtts = current_session.get_gtt_cache()
-        
         symbols_to_delete = []
         for g in all_gtts:
-            if g.get("status", "").lower() == "active":
-                symbol = g.get("tradingsymbol")
+            if g.get("status", "").lower() == "active" and g.get("orders") and g["orders"][0].get("transaction_type") == "BUY":
+                symbol = g.get("condition", {}).get("tradingsymbol")
                 if symbol and symbol in new_plan_symbols:
                     symbols_to_delete.append(symbol)
         
         symbols_to_delete = list(set(symbols_to_delete))
 
         if symbols_to_delete:
-            logging.info(f"Attempting to delete existing GTTs for symbols in dynamic averaging plan: {symbols_to_delete}")
+            logging.debug(f"Attempting to delete existing GTTs for symbols in dynamic averaging plan: {symbols_to_delete}")
             deleted_gtt_symbols = manager.delete_gtts_for_symbols(symbols_to_delete)
             if deleted_gtt_symbols:
                 print(f"Successfully deleted existing GTTs for: {', '.join(deleted_gtt_symbols)}")
@@ -397,3 +396,16 @@ def exit():
 
 if __name__ == "__main__":
     app()
+
+@app.command()
+def download_historical_trades(start_date: str = typer.Option(..., help="Start date in YYYY-MM-DD format"), end_date: str = typer.Option(..., help="End date in YYYY-MM-DD format")):
+    """Download historical trades from the broker."""
+    try:
+        holdings_analyzer = get_holdings_analyzer()
+        if holdings_analyzer:
+            summary = holdings_analyzer.download_historical_trades(current_session.broker, start_date, end_date)
+            print(summary.get("message"))
+        else:
+            print("Could not get holdings analyzer.")
+    except Exception as e:
+        print(f"❌ Error downloading historical trades: {e}")

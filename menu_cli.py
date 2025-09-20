@@ -4,7 +4,8 @@ from core.cli import app, set_current_session # Added set_current_session
 import os
 import logging
 import argparse
-from core.utils import setup_logging
+from datetime import datetime, timedelta
+from core.utils import setup_logging, write_csv
 from core.session import SessionCache # Changed from session_singleton
 from core.session_manager import SessionManager
 from core.holdings import HoldingsAnalyzer
@@ -62,12 +63,26 @@ def main_menu():
         us = "NM9165"
 
     user_id = input(f"Enter User ID for {broker_name} (default: {us}): ").strip() or us
-         
+
     try:
         session.broker = BrokerFactory.get_broker(broker_name, user_id, config)
         session.broker.login()
+
+        if broker_name == 'upstox':
+            if input("Upload trades for the last 400 days? (y/n, default: n): ").lower() == 'y':
+                end_date = datetime.now()
+                start_date = end_date - timedelta(days=600)
+                
+                end_date_str = end_date.strftime('%Y-%m-%d')
+                start_date_str = start_date.strftime('%Y-%m-%d')
+
+                result = runner.invoke(app, ["download-historical-trades", "--start-date", start_date_str, "--end-date", end_date_str], catch_exceptions=False)
+                print(result.output)
+                if result.exception:
+                    print(f"❌ Exception occurred: {result.exception}")
+
     except Exception as e:
-        print(f"❌ Failed to initialize broker: {e}")
+        print(f"❌ Failed to initialize or use broker: {e}")
         return
 
     print("🔄 Refreshing all caches...")
@@ -80,8 +95,8 @@ def main_menu():
 
     while True:
         print("\n📋 Menu:")
-        print("1. List GTT orders")
-        print("2. Analyze GTT orders")
+        print("1. List Entry Startegies")
+        print("2. Analyze Entry orders")
         print("3. Analyze Holdings")
         print("4. Analyze ROI Trend")
         print("5. Exit")
@@ -94,7 +109,7 @@ def main_menu():
             if result.exception:
                 print(f"❌ Exception occurred: {result.exception}")
 
-            if input("\n1.1 Place entry-level GTT orders? (y/n): ").lower() == "y":
+            if input("\n1.1 Place Multi Level Entry orders? (y/n): ").lower() == "y":
                 result = runner.invoke(app, ["place-gtt-orders"], catch_exceptions=False)
                 print(result.output)
                 if result.exception:
@@ -105,22 +120,21 @@ def main_menu():
             if result.exception:
                 print(f"❌ Exception occurred: {result.exception}")
 
-            if input("\n1.2 Place dynamic averaging GTT orders? (y/n): ").lower() == "y":
+            if input("\n1.2 Place Dynamic Averaging Entry orders? (y/n): ").lower() == "y":
                 result = runner.invoke(app, ["place-dynamic-averaging-orders"], catch_exceptions=False)
                 print(result.output)
                 if result.exception:
                     print(f"❌ Exception occurred: {result.exception}")
 
         elif choice == "2":
-            print("\n📉 GTT Orders Below Threshold:")
             result = runner.invoke(app, ["analyze-gtt-variance", "--threshold", "100.0"], catch_exceptions=False)
             print(result.output)
 
             menu_gtt_summary()
 
             print("\n📌 Sub-options:")
-            print("1. Delete GTTs with variance greater than a custom threshold")
-            print("2. Adjust GTTs to match a target variance")
+            print("1. Delete entry orders with variance greater than a custom threshold")
+            print("2. Adjust entry orders to match a target variance")
             sub_choice = input("Enter your sub-option (1/2 or press Enter to skip): ").strip()
 
             if sub_choice == "1":

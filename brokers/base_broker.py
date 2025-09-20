@@ -85,4 +85,11 @@ class BaseBroker(ABC):
         """
         pass
 
+    @abstractmethod
+    def download_historical_trades(self, start_date, end_date):
+        """
+        Download historical trades from the broker.
+        """
+        pass
+
 

@@ -86,3 +86,25 @@ def get_trade_from_tradebook(trade_id: str, tradebook: List[Dict]) -> Dict:
         if trade.get("trade_id") == trade_id:
             return trade
     return None
+
+def get_symbol_from_isin(isin: str) -> str:
+    """
+    Retrieves the symbol for a given ISIN from the Name-symbol-mapping.csv file.
+
+    Args:
+        isin (str): The ISIN of the instrument.
+
+    Returns:
+        str: The symbol corresponding to the ISIN, or None if not found.
+    """
+    try:
+        mapping_file_path = os.path.join(os.path.dirname(__file__), '..', 'data', 'Name-symbol-mapping.csv')
+        df = pd.read_csv(mapping_file_path)
+        df.columns = [col.strip() for col in df.columns]
+        symbol = df[df['ISIN NUMBER'] == isin]['SYMBOL'].values
+        if len(symbol) > 0:
+            return symbol[0]
+        return None
+    except Exception as e:
+        logging.error(f"Failed to get symbol from ISIN: {e}")
+        return None

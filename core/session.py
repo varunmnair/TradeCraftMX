@@ -100,7 +100,7 @@ class SessionCache:
         if not os.path.exists(self.GTT_PLAN_CACHE_PATH):
             return []
         try:
-            print("📂 Reading GTT plan from cache: ")  
+            logging.debug("📂 Reading GTT plan from cache: ")  
             with open(self.GTT_PLAN_CACHE_PATH, "r") as f:
                 return json.load(f)
         except Exception as e:

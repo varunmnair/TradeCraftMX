@@ -1,7 +1,7 @@
 from .base_broker import BaseBroker
 import upstox_client
 from upstox_client.rest import ApiException
-from core.utils import read_csv, write_csv
+from core.utils import read_csv, write_csv, get_symbol_from_isin
 import os
 import requests
 import json
@@ -446,3 +446,69 @@ class UpstoxBroker(BaseBroker):
         file_path = f"data/{self.user_id}_trade_book.csv"
         logging.debug(f"Updating trade book for Upstox: {file_path}")
         write_csv(file_path, data)
+
+    def download_historical_trades(self, start_date, end_date):
+        """
+        Download historical trades from Upstox API.
+        """
+        logging.debug(f"Downloading historical trades for user {self.user_id} from {start_date} to {end_date}")
+        all_trades = []
+        page_number = 1
+        page_size = 500  # As per Upstox API docs, max page size is 500
+
+        headers = {
+            'Accept': 'application/json',
+            'Authorization': f'Bearer {self.access_token}'
+        }
+
+        while True:
+            url = f"https://api.upstox.com/v2/charges/historical-trades?start_date={start_date}&end_date={end_date}&page_size={page_size}&page_number={page_number}"
+            
+            try:
+                response = requests.get(url, headers=headers)
+                response.raise_for_status()
+                data = response.json()
+
+                if data.get('status') != 'success':
+                    logging.error(f"Error from Upstox API: {data.get('errors')}")
+                    break
+
+                trades = data.get('data', [])
+                if not trades:
+                    break
+
+                all_trades.extend(trades)
+
+                meta_data = data.get('meta_data', {})
+                total_pages = meta_data.get('page', {}).get('total_pages', 1)
+
+                if page_number >= total_pages:
+                    break
+
+                page_number += 1
+
+            except requests.exceptions.RequestException as e:
+                logging.error(f"Error downloading historical trades from Upstox: {e}")
+                break
+        
+        # Transform data
+        transformed_trades = []
+        for trade in all_trades:
+            transformed_trade = {
+                'symbol': get_symbol_from_isin(trade.get('isin')),
+                'isin': trade.get('isin'),
+                'trade_date': trade.get('trade_date'),
+                'exchange': trade.get('exchange'),
+                'segment': trade.get('segment'),
+                'series': trade.get('segment'),  # As per user mapping
+                'trade_type': trade.get('transaction_type'),
+                'auction': 'FALSE',
+                'quantity': trade.get('quantity'),
+                'price': trade.get('price'),
+                'trade_id': trade.get('trade_id'),
+                'order_id': 'NA',
+                'order_execution_time': 'NA'
+            }
+            transformed_trades.append(transformed_trade)
+        
+        return transformed_trades

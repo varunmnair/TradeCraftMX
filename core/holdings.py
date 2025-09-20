@@ -4,7 +4,7 @@ import logging
 from datetime import datetime
 from typing import List, Dict
 
-from core.utils import read_csv
+from core.utils import read_csv, write_csv
 
 class HoldingsAnalyzer:
     def __init__(self, user_id: str, broker_name: str):
@@ -29,7 +29,7 @@ class HoldingsAnalyzer:
             result_summary["total_records_fetched"] = len(new_df)
 
             if new_df.empty:
-                logging.info("No new trades found.")
+                logging.debug("No new trades found.")
                 return result_summary
             new_df = new_df.rename(columns={
                 "tradingsymbol": "symbol",
@@ -307,3 +307,30 @@ class HoldingsAnalyzer:
         self.write_roi_results(sorted_results)
         
         return sorted_results
+
+    def download_historical_trades(self, broker, start_date, end_date):
+        """
+        Downloads historical trades from the broker and saves them to a CSV file.
+        """
+        try:
+            logging.info(f"Fetching trades from {start_date} to {end_date} for user {broker.user_id}...")
+            trades = broker.download_historical_trades(start_date, end_date)
+            
+            if trades:
+                file_path = f"data/{broker.user_id}-{broker.broker_name}-tradebook.csv"
+                write_csv(file_path, trades)
+                return {
+                    "message": f"Successfully saved {len(trades)} trades to {file_path}",
+                    "trade_count": len(trades),
+                    "file_path": file_path
+                }
+            else:
+                return {
+                    "message": "No trades found for the specified period.",
+                    "trade_count": 0,
+                    "file_path": None
+                }
+
+        except Exception as e:
+            logging.error(f"Failed to download historical trades: {e}")
+            raise e

@@ -183,3 +183,7 @@ class ZerodhaBroker(BaseBroker):
         file_path = f"data/{self.user_id}_trade_book.csv"
         logging.debug(f"Updating trade book for Zerodha: {file_path}")
         write_csv(file_path, data)
+
+    def download_historical_trades(self, start_date, end_date):
+        logging.info("Downloading historical trades is not implemented for Zerodha yet.")
+        return []
