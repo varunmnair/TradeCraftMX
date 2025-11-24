@@ -20,8 +20,24 @@ class DynamicAveragingPlanner:
         candidates = []
         entry_levels_map = {entry.get("symbol", "").strip().upper(): entry for entry in self.entry_levels}
 
+        from datetime import datetime
+        # Get completed trades for the day
+        trades = self.broker.trades()
+        completed_trade_symbols = set()
+        today = datetime.now().date()
+
+        for trade in trades:
+            trade_date = trade.get('fill_timestamp')
+            if trade_date and trade_date.date() == today:
+                if trade.get('transaction_type') == 'BUY':
+                    completed_trade_symbols.add(trade.get('tradingsymbol').upper())
+
         for holding in self.holdings:
             symbol = holding["tradingsymbol"].replace("#", "").replace("-BE", "").upper()
+
+            if symbol in completed_trade_symbols:
+                self.skipped_symbols.append({"symbol": symbol, "skip_reason": "Trade already completed today"})
+                continue
            
             entry = entry_levels_map.get(symbol)
 

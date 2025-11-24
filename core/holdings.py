@@ -259,7 +259,11 @@ class HoldingsAnalyzer:
                 if qty_needed <= 0:
                     break
                 trade_qty = trade["quantity"]
-                trade_date = trade["trade_date"].date()
+                trade_date = trade["trade_date"]
+                if pd.isna(trade_date):
+                    logging.warning(f"Skipping trade with invalid date: {trade.to_dict()}")
+                    continue
+                trade_date = trade_date.date()
                 used_qty = min(qty_needed, trade_qty)
                 weighted_sum += used_qty * trade_date.toordinal()
                 total_qty += used_qty

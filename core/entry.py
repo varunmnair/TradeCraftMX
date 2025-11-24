@@ -71,5 +71,5 @@ def detect_duplicates(scrips: List[Dict]) -> List[str]:
     )
     duplicates = [symbol for symbol, count in symbol_counts.items() if count > 1]
     if duplicates:
-        logging.warning(f"Duplicate symbols found: {duplicates}")
+        logging.debug(f"Duplicate symbols found: {duplicates}")
     return duplicates

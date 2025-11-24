@@ -11,6 +11,7 @@ from core.session_manager import SessionManager
 from core.holdings import HoldingsAnalyzer
 from brokers.broker_factory import BrokerFactory
 
+
 parser = argparse.ArgumentParser(description='TradeCraftX CLI')
 parser.add_argument(
     '--log-level',
@@ -22,7 +23,7 @@ args = parser.parse_args()
 setup_logging(args.log_level.upper())
 runner = CliRunner()
 
-from core.cli import list_duplicate_gtt_symbols, show_total_buy_gtt_amount
+from core.cli import ask_ai_analyst, list_duplicate_gtt_symbols, show_total_buy_gtt_amount
 
 def menu_gtt_summary():
     duplicates = list_duplicate_gtt_symbols()
@@ -98,8 +99,9 @@ def main_menu():
         print("1. List Entry Startegies")
         print("2. Analyze Entry orders")
         print("3. Analyze Holdings")
-        print("4. Analyze ROI Trend")
-        print("5. Exit")
+        print("4. Ask AI Analyst")
+        print("5. Analyze ROI Trend")
+        print("6. Exit")
 
         choice = input("Enter your choice: ").strip()
 
@@ -190,15 +192,21 @@ def main_menu():
                 print(f"❌ Error analyzing holdings: {e}")
 
         elif choice == "4":
+            ask_ai_analyst()
+
+        elif choice == "5":
             result = runner.invoke(app, ["write-roi"])
             print(result.output)
 
-        elif choice == "5":
+        elif choice == "6":
             print("👋 Exiting workflow.")
             break
 
         else:
             print("⚠️ Invalid choice. Please try again.")
+
+
+
 
 if __name__ == "__main__":
     main_menu()

@@ -357,15 +357,27 @@ class UpstoxBroker(BaseBroker):
                 def parse_datetime(date_str):
                     if not date_str:
                         return None
-                    # Assuming date_str is in ISO format, e.g., '2023-01-01T12:00:00' or with 'Z'
-                    if 'Z' in date_str:
-                        date_str = date_str.replace('Z', '')
-                    if '.' in date_str: # handle milliseconds
+                    
+                    # List of possible formats
+                    formats_to_try = [
+                        '%Y-%m-%dT%H:%M:%S',  # ISO format
+                        '%Y-%m-%d %H:%M:%S',  # Space separated
+                    ]
+
+                    # Pre-process string to handle variations
+                    date_str = date_str.replace('Z', '')
+                    if '.' in date_str:
                         date_str = date_str.split('.')[0]
-                    try:
-                        return datetime.strptime(date_str, '%Y-%m-%dT%H:%M:%S')
-                    except (ValueError, TypeError):
-                        return date_str # return original if format is unexpected
+
+                    for fmt in formats_to_try:
+                        try:
+                            return datetime.strptime(date_str, fmt)
+                        except (ValueError, TypeError):
+                            continue
+                    
+                    # If all formats fail, log a warning and return the original string
+                    logging.warning(f"Could not parse datetime string '{date_str}' with known formats.")
+                    return date_str
 
                 def format_time(date_obj):
                      if not date_obj or not isinstance(date_obj, datetime):
@@ -376,13 +388,18 @@ class UpstoxBroker(BaseBroker):
                 
                 order_timestamp_dt = parse_datetime(trade.order_timestamp)
 
+                tradingsymbol = trade.tradingsymbol
+                instrument_token = trade.instrument_token
+                if instrument_token and instrument_token.startswith('NSE_EQ') and not tradingsymbol.endswith('-EQ'):
+                    tradingsymbol += '-EQ'
+
                 formatted_trade = {
                     'account_id': self.user_id,
                     'trade_id': trade.trade_id,
                     'order_id': trade.order_id,
                     'exchange': trade.exchange,
-                    'tradingsymbol': trade.tradingsymbol,
-                    'instrument_token': trade.instrument_token,
+                    'tradingsymbol': tradingsymbol,
+                    'instrument_token': instrument_token,
                     'product': product_mapping.get(trade.product, trade.product),
                     'average_price': trade.average_price,
                     'quantity': trade.quantity,

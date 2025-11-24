@@ -1,0 +1,59 @@
+### TradeCraftX: A Detailed Explanation
+
+**TradeCraftX** is a Python program designed to automate and enhance stock trading workflows, particularly for traders using Zerodha and Upstox brokers in India. It provides a command-line interface (CLI) to manage and analyze a user's investment portfolio, with a strong focus on Good-Till-Triggered (GTT) orders. The tool helps traders implement systematic entry and averaging strategies, analyze portfolio performance, and manage risk.
+
+#### High-Level Flow
+
+1.  **Initialization:** The user starts the program via `menu_cli.py`. They are prompted to choose a broker (Zerodha or Upstox).
+2.  **Authentication:** The `SessionManager` class handles authentication. It retrieves the API keys from environment variables and the access tokens from the `.pkl` files in the `auth/` directory. If the access token is expired, it will likely need to be refreshed manually (the automatic refresh flow is not explicitly implemented in the code I've seen).
+3.  **Main Menu:** The user is presented with a menu of options to perform various actions, such as analyzing holdings, managing GTT orders, and analyzing ROI.
+4.  **Command Execution:** The user selects an option from the menu, which triggers a corresponding command in the `core/cli.py` module. These commands are built using the `typer` library.
+5.  **Broker Interaction:** The commands interact with the broker's API through a broker-specific implementation of the `BaseBroker` interface. The `BrokerFactory` class is used to get the correct broker instance.
+6.  **Analysis and Output:** The program performs analysis on the fetched data (e.g., calculating ROI, variance, etc.) and displays the results in a user-friendly tabular format in the console. The `pandas` library is used for data manipulation.
+7.  **Caching:** The program uses caching to store data like GTT plans, holdings, and entry levels to improve performance and avoid redundant API calls. The cache is stored in the `data/` directory.
+
+#### File-by-File Breakdown
+
+*   **`menu_cli.py`**: The main entry point of the application. It handles the main menu, user input, and orchestrates the overall workflow. It initializes the `SessionManager` and the selected broker.
+
+*   **`requirements.txt`**: Lists the project's dependencies:
+    *   `fastapi` & `uvicorn`: Suggests a web server component, likely for a planned REST API.
+    *   `pandas`: Used for data manipulation and analysis.
+    *   `python-dotenv`: Used to manage environment variables (API keys, etc.).
+    *   `typer`: Used to create the command-line interface.
+    *   `kiteconnect`: The official Python client for the Zerodha Kite Connect API.
+    *   `requests`: Used for making HTTP requests.
+
+*   **`core/cli.py`**: The heart of the application's functionality. It defines all the CLI commands using `typer`. Each command corresponds to a specific feature of the application, such as `analyze-holdings`, `place-gtt-orders`, etc.
+
+*   **`core/holdings.py`**: Contains the `HoldingsAnalyzer` class, which is responsible for:
+    *   **Portfolio Analysis:** Calculating various metrics for each holding, such as P&L, ROI, weighted ROI, and trend analysis.
+    *   **Tradebook Management:** Fetching new trades from the broker, removing duplicates, and appending them to a local CSV file.
+    *   **ROI Data Management:** Writing daily ROI results to a CSV file for historical analysis.
+
+*   **`core/gtt_manage.py`**: Contains the `GTTManager` class, which is responsible for all GTT-related operations:
+    *   **Placing GTT Orders:** Placing GTT orders based on a generated plan.
+    *   **Analyzing GTT Orders:** Fetching active GTT orders and calculating the variance between the trigger price and the LTP.
+    *   **Managing GTT Orders:** Adjusting and deleting GTT orders based on user-defined criteria.
+
+*   **`core/multilevel_entry.py`**: Contains the `MultiLevelEntryStrategy` class. This class implements a strategy to place GTT buy orders at multiple predefined price levels. It reads the entry levels from a CSV file (`entry_levels.csv`) and generates a GTT plan based on the current holdings and market prices.
+
+*   **`core/dynamic_avg.py`**: Contains the `DynamicAveragingPlanner` class. This class implements a strategy to dynamically average down a position by placing GTT buy orders when the price of a stock drops.
+
+*   **`brokers/broker_factory.py`**: A simple factory class that creates and returns an instance of the appropriate broker class (`ZerodhaBroker` or `UpstoxBroker`) based on the user's selection.
+
+*   **`brokers/zerodha_broker.py`**: The implementation of the `BaseBroker` interface for Zerodha. It uses the `kiteconnect` library to communicate with the Zerodha API for all broker-related operations.
+
+*   **`brokers/upstox_broker.py`**: (I haven't read this file, but I can infer its function) This would be the implementation of the `BaseBroker` interface for Upstox, using the Upstox API.
+
+*   **`auth/` directory**: This directory contains `.pkl` files (`kite_access_token.pkl`, `upstox_access_token.pkl`) which are used to store the access tokens for the respective brokers. This avoids the need to go through the full login process every time the program is run.
+
+*   **`data/` directory**: This directory is used to store various data files, including:
+    *   `{user_id}-{broker_name}-tradebook.csv`: The user's tradebook.
+    *   `{user_id}-{broker_name}-roi-data.csv`: Historical ROI data.
+    *   `{user_id}-{broker_name}-entry-levels.csv`: The user's entry levels for the multi-level entry strategy.
+    *   `gtt_plan_cache.json`: A temporary file to store the GTT plan before it is executed.
+
+*   **`render.yaml`**: A configuration file for deploying the application on the Render platform. This suggests that the application is intended to be deployed as a web service, which aligns with the inclusion of `fastapi` and `uvicorn` in the `requirements.txt` file.
+
+In summary, **TradeCraftX** is a powerful and flexible tool for traders who want to automate their trading strategies and gain deeper insights into their portfolio performance. It is well-structured, modular, and easily extensible to support other brokers and trading strategies. The use of a CLI makes it easy to integrate into automated workflows and scripts. The planned web interface will make it even more accessible to a wider range of users.

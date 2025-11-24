@@ -409,3 +409,27 @@ def download_historical_trades(start_date: str = typer.Option(..., help="Start d
             print("Could not get holdings analyzer.")
     except Exception as e:
         print(f"❌ Error downloading historical trades: {e}")
+
+from agent.manager import AgentManager
+
+@app.command()
+def ask_ai_analyst():
+    """
+    Handles the AI analyst interaction.
+    """
+    if not current_session or not hasattr(current_session, 'broker') or not current_session.broker:
+        print("❌ Broker session not initialized. Please login first.")
+        return
+
+    agent_manager = AgentManager(current_session.broker)
+    while True:
+        try:
+            user_query = input("Ask your AI analyst a question (or press Enter to exit): ").strip()
+            if not user_query:
+                break
+
+            response = agent_manager.ask(user_query)
+            print(response)
+
+        except Exception as e:
+            print(f"❌ An unexpected error occurred: {e}")
