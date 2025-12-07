@@ -40,7 +40,11 @@ class EntryLevelReviser:
             
             # Convert to DataFrame for easier processing
             self.df = pd.DataFrame(self.historical_data)
-            self.df['timestamp'] = pd.to_datetime(self.df['timestamp'])
+            # The Upstox API returns a list of lists, so we need to name the columns.
+            # Format: [timestamp, open, high, low, close, volume, open_interest]
+            self.df.columns = ['timestamp', 'open', 'high', 'low', 'close', 'volume', 'open_interest']
+
+            self.df['timestamp'] = pd.to_datetime(self.df['timestamp'], format='%Y-%m-%dT%H:%M:%S%z')
             self.df.set_index('timestamp', inplace=True)
             for col in ['open', 'high', 'low', 'close', 'volume']:
                 self.df[col] = pd.to_numeric(self.df[col])
