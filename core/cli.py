@@ -295,7 +295,15 @@ def analyze_holdings(
     logging.debug(f"Filters: {filters}, Sort by: {sort_by}")
     try:
         current_session.refresh_all_caches()
-        parsed_filters = json.loads(filters) if filters else {}
+        parsed_filters = {}
+        if filters:
+            try:
+                parsed_filters = json.loads(filters)
+                if not isinstance(parsed_filters, dict):
+                    raise ValueError("Filter must be a valid JSON object (e.g., '{\"P&L%\": -5}').")
+            except (json.JSONDecodeError, ValueError) as e:
+                print(f"❌ Invalid filter format: {e}")
+                return
         logging.debug("Getting holdings analyzer.")
         holdings_analyzer = get_holdings_analyzer()
         if holdings_analyzer:

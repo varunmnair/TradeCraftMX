@@ -57,18 +57,12 @@ class MultiLevelEntryStrategy(BaseEntryStrategy):
         for scrip in self.entry_levels:
             symbol = scrip.get("symbol")
             if not symbol:
-                continue
-            
-            if symbol == "AFIL":
-                logging.debug(f"--- Identifying LEHAR ---")
-                logging.debug(f"  Scrip: {scrip}")
+                continue            
 
             exchange = scrip.get("exchange", "NSE")
 
             # 1. Check for existing GTT order
             if symbol.upper() in existing_gtt_symbols:
-                if symbol == "AFIL":
-                    logging.debug(f"  Skipping LEHAR: GTT already exists.")
                 self.skipped_orders.append(self._create_skipped_order(symbol, "GTT already exists for symbol", exchange=exchange))
                 continue
             
@@ -80,8 +74,6 @@ class MultiLevelEntryStrategy(BaseEntryStrategy):
             # 3. Check for valid allocation
             allocated = scrip.get("Allocated")
             if allocated is None or (isinstance(allocated, float) and math.isnan(allocated)) or allocated == 0:
-                if symbol == "AFIL":
-                    logging.debug(f"  Skipping LEHAR: Invalid or zero allocation ({allocated}).")
                 self.skipped_orders.append(self._create_skipped_order(symbol, "Invalid or zero allocation", exchange=exchange))
                 continue
 
@@ -95,22 +87,16 @@ class MultiLevelEntryStrategy(BaseEntryStrategy):
             num_entries = (1 if is_entry1_valid else 0) + (1 if is_entry2_valid else 0) + (1 if is_entry3_valid else 0)
 
             if num_entries == 0:
-                if symbol == "AFIL":
-                    logging.debug(f"  Skipping LEHAR: No valid entry levels.")
                 self.skipped_orders.append(self._create_skipped_order(symbol, "No valid entry levels", exchange=exchange))
                 continue
 
             # 5. Fetch and validate LTP (done last to save API calls)
             ltp = self.cmp_manager.get_cmp(exchange, symbol)
             if ltp is None or ltp == 0 or (isinstance(ltp, float) and math.isnan(ltp)):
-                if symbol == "AFIL":
-                    logging.debug(f"  Skipping LEHAR: Invalid CMP ({ltp}).")
                 self.skipped_orders.append(self._create_skipped_order(symbol, "Invalid CMP", exchange=exchange))
                 continue
             
             # If all checks pass, add to candidates
-            if symbol == "AFIL":
-                logging.debug(f"  LEHAR added to candidates.")
             candidate_scrip = scrip.copy()
             candidate_scrip['ltp'] = ltp
             candidate_scrip['num_entries'] = num_entries
@@ -187,75 +173,46 @@ class MultiLevelEntryStrategy(BaseEntryStrategy):
             ltp = scrip["ltp"]
             allocated = scrip["Allocated"]
 
-            # Add logging for LEHAR
-            if symbol == "AFIL":
-                logging.debug(f"--- Processing LEHAR ---")
-                logging.debug(f"  Scrip: {scrip}")
 
             total_qty, average_price = self._get_holding_details(holdings_map, symbol)
             invested_amount = total_qty * average_price
 
-            if symbol == "AFIL":
-                logging.debug(f"  Holdings - Total Qty: {total_qty}, Avg Price: {average_price}, LTP: {ltp} ")
-                logging.debug(f"  Calculated Invested Amount: {invested_amount}")
-                logging.debug(f"  Allocated Amount: {allocated}")
-
             if invested_amount >= allocated:
-                if symbol == "AFIL":
-                    logging.warning(f"  Skipping LEHAR: Invested amount ({invested_amount}) >= Allocated amount ({allocated})")
                 self.skipped_orders.append(self._create_skipped_order(symbol, "Holding has reached or exceeded allocated amount", exchange, ltp))
                 continue
 
             entry_level, entry_price, target_investment = self._determine_entry_level(scrip, invested_amount, ltp)
 
-            if symbol == "AFIL":
-                logging.debug(f"  Determined Entry Level: {entry_level}, Entry Price: {entry_price}, Target Investment: {target_investment}")
-
             if not entry_level:
-                if symbol == "AFIL":
-                    logging.debug(f"  Skipping LEHAR: Does not qualify for any entry level.")
                 self.skipped_orders.append(self._create_skipped_order(symbol, "Holding does not qualify for any entry level", exchange, ltp))
                 continue
 
             if not self._is_valid_price(entry_price):
-                if symbol == "AFIL":
-                    logging.debug(f"  Skipping LEHAR: Invalid entry price ({entry_price}).")
                 self.skipped_orders.append(self._create_skipped_order(symbol, "Invalid entry price for quantity calculation", exchange, ltp, entry_level))
                 continue
 
             amount_to_invest = min(target_investment - invested_amount, allocated - invested_amount)
-            if symbol == "AFIL":
-                logging.debug(f"  Amount to Invest: {amount_to_invest}")
 
             if amount_to_invest <= 0:
-                if symbol == "AFIL":
-                    logging.debug(f"  Skipping LEHAR: Amount to invest is not positive ({amount_to_invest}).")
                 self.skipped_orders.append(self._create_skipped_order(symbol, "No further investment needed for this level", exchange, ltp, entry_level))
                 continue
 
-            qty = self._calculate_quantity(amount_to_invest, entry_price)
-            if symbol == "AFIL":
-                logging.debug(f"  Calculated Quantity: {qty}")
-
-            if qty == 0:
-                if symbol == "AFIL":
-                    logging.error(f"  Skipping LEHAR: Computed quantity is 0.")
-                self.skipped_orders.append(self._create_skipped_order(symbol, "Computed quantity is 0", exchange, ltp, entry_level))
-                continue
-
+            # First, determine the final order price
             order_price = min(entry_price, round(ltp * (1 + self.ORDER_PRICE_BUFFER_PERCENT), 2)) if entry_price > ltp else entry_price
             order_price, trigger = self.adjust_trigger_and_order_price(order_price, ltp)
 
+            # Now, calculate quantity based on the *final* order price
+            qty = self._calculate_quantity(amount_to_invest, order_price)
+
+            if qty == 0:
+                self.skipped_orders.append(self._create_skipped_order(symbol, "Computed quantity is 0", exchange, ltp, entry_level))
+                continue
+
             variance = abs(ltp - trigger) / trigger if trigger > 0 else 0
             if variance > self.LTP_TRIGGER_VARIANCE_PERCENT:
-                if symbol == "AFIL":
-                    logging.debug(f"  Skipping LEHAR: LTP-trigger variance of {variance:.1%} exceeds threshold.")
                 reason = f"LTP-trigger variance of {variance:.1%} exceeds threshold of {self.LTP_TRIGGER_VARIANCE_PERCENT:.1%}"
                 self.skipped_orders.append(self._create_skipped_order(symbol, reason, exchange, ltp, entry_level))
                 continue
-
-            if symbol == "AFIL":
-                logging.debug(f"  LEHAR successfully added to plan.")
 
             final_plan.append({
                 "symbol": symbol,
