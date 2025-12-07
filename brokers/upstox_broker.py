@@ -8,7 +8,7 @@ import json
 import pandas as pd
 import logging
 
-from datetime import datetime
+from datetime import datetime, date, timedelta
 
 class UpstoxBroker(BaseBroker):
     """
@@ -529,3 +529,43 @@ class UpstoxBroker(BaseBroker):
             transformed_trades.append(transformed_trade)
         
         return transformed_trades
+
+    def get_historical_data(self, symbol, interval='day', start_date=None, end_date=None):
+        """
+        Fetch historical candle data for a given symbol.
+        - Fetches last 90 days of data if start_date and end_date are not provided.
+        - Caches data locally for performance.
+        """
+        logging.debug(f"Getting historical data for {symbol}")
+
+        if not self.history_api:
+            self.login()
+
+        instrument_key = self._get_instrument_key(symbol, 'NSE_EQ')
+        if not instrument_key:
+            logging.error(f"Could not resolve instrument key for symbol: {symbol}")
+            return None
+
+        # Default to last 90 days if dates are not provided
+        if not end_date:
+            end_date = date.today()
+        if not start_date:
+            start_date = end_date - timedelta(days=90)
+
+        # Format dates as YYYY-MM-DD string
+        end_date_str = end_date.strftime('%Y-%m-%d')
+        start_date_str = start_date.strftime('%Y-%m-%d')
+
+        try:
+            api_response = self.history_api.get_historical_candle_data(
+                instrument_key=instrument_key,
+                interval=interval,
+                to_date=end_date_str,
+                from_date=start_date_str,
+                api_version='v2'
+            )
+            logging.debug(f"Successfully fetched historical data for {symbol}")
+            return api_response.data.candles
+        except ApiException as e:
+            logging.error(f"Error fetching historical data from Upstox: {e}")
+            return None

@@ -47,8 +47,8 @@ class HoldingsAnalyzer:
             new_df["segment"] = "EQ"
             new_df["series"] = new_df["symbol"].apply(lambda x: "EQ")
             new_df["auction"] = False
-            new_df["trade_date"] = pd.to_datetime(new_df["order_execution_time"]).dt.date
-            new_df["trade_date"] = new_df["trade_date"].apply(lambda x: x.strftime("%#m/%#d/%Y"))
+            # Use a standard, unambiguous date format (YYYY-MM-DD)
+            new_df["trade_date"] = pd.to_datetime(new_df["order_execution_time"]).dt.strftime('%Y-%m-%d')
 
             new_df = new_df[[
                 "symbol", "isin", "trade_date", "exchange", "segment", "series",
@@ -216,11 +216,21 @@ class HoldingsAnalyzer:
             filters = {}
 
         entry_levels = read_csv(self.entry_levels_path)
-        quality_map = {s["symbol"].upper(): s.get("Quality", "-") for s in entry_levels}
+        quality_map = {
+            str(s["symbol"]).upper(): s.get("Quality", "-")
+            for s in entry_levels
+            if "symbol" in s and isinstance(s["symbol"], str) and s["symbol"].strip()
+        }
 
         trades_df = pd.read_csv(self.tradebook_path)
         trades_df.columns = [col.strip().lower().replace(" ", "_") for col in trades_df.columns]
-        trades_df["trade_date"] = pd.to_datetime(trades_df["trade_date"], errors='coerce')
+        # Handle mixed date formats by trying multiple formats.
+        # First, try the old format. `errors='coerce'` will turn non-matching dates (like the new YYYY-MM-DD) into NaT.
+        parsed_dates_old = pd.to_datetime(trades_df["trade_date"], format='%m/%d/%Y', errors='coerce')
+        # Then, for any NaT values, try the new format.
+        parsed_dates_new = pd.to_datetime(trades_df["trade_date"], format='%Y-%m-%d', errors='coerce')
+        # Combine the results. `where` keeps the old format's results unless they are NaT, then it uses the new format's results.
+        trades_df["trade_date"] = parsed_dates_old.where(parsed_dates_old.notna(), parsed_dates_new)
         trades_df = trades_df[trades_df["trade_type"].str.lower() == "buy"]
 
         holdings = broker.get_holdings()

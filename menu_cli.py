@@ -10,6 +10,7 @@ from core.session import SessionCache # Changed from session_singleton
 from core.session_manager import SessionManager
 from core.holdings import HoldingsAnalyzer
 from brokers.broker_factory import BrokerFactory
+from core.entry_level_reviser import EntryLevelReviser
 
 
 parser = argparse.ArgumentParser(description='TradeCraftX CLI')
@@ -54,7 +55,6 @@ def main_menu():
         config['api_key'] = session_manager.upstox_api_key
         config['api_secret'] = session_manager.upstox_api_secret
         config['redirect_uri'] = session_manager.upstox_redirect_uri
-        # For Upstox, the 'code' is part of the login flow, handled by get_valid_upstox_access_token
         config['access_token'] = session_manager.get_valid_upstox_access_token()
         us = "32ADGT"
     else:
@@ -101,7 +101,8 @@ def main_menu():
         print("3. Analyze Holdings")
         print("4. Ask AI Analyst")
         print("5. Analyze ROI Trend")
-        print("6. Exit")
+        print("6. Revise Entry Levels")
+        print("7. Exit")
 
         choice = input("Enter your choice: ").strip()
 
@@ -197,15 +198,19 @@ def main_menu():
         elif choice == "5":
             result = runner.invoke(app, ["write-roi"])
             print(result.output)
-
+        
         elif choice == "6":
+            result = runner.invoke(app, ["revise-entry-levels"], catch_exceptions=False)
+            print(result.output)
+            if result.exception:
+                print(f"❌ Exception occurred: {result.exception}")
+
+        elif choice == "7":
             print("👋 Exiting workflow.")
             break
 
         else:
             print("⚠️ Invalid choice. Please try again.")
-
-
 
 
 if __name__ == "__main__":

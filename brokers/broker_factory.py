@@ -1,5 +1,6 @@
 from .zerodha_broker import ZerodhaBroker
 from .upstox_broker import UpstoxBroker
+from core.session_manager import SessionManager
 
 class BrokerFactory:
     """

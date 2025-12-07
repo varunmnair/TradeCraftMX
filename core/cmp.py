@@ -3,6 +3,7 @@ import time
 import logging
 import requests
 import pandas as pd
+from datetime import date, timedelta
 
 from core.utils import read_csv
 
@@ -21,17 +22,28 @@ class CMPManager:
 
     # ──────────────── Symbol Collection ──────────────── #
     def _collect_symbols(self, holdings, gtts, entry_levels):
+        def add_symbol(collection, exchange, symbol):
+            # Ensure both exchange and symbol are valid, non-empty strings before adding.
+            # This prevents errors from NaN values (floats) in data sources.
+            exchange_str = str(exchange or "").strip().upper()
+            symbol_str = str(symbol or "").strip().upper()
+            
+            if exchange_str and symbol_str and exchange_str != 'NAN':
+                collection.add((exchange_str, symbol_str.replace("#", "")))
+            else:
+                logging.debug(f"Skipping invalid symbol data: exchange='{exchange}', symbol='{symbol}'")
+
         symbols = set()
         for h in holdings:
             if isinstance(h, dict):
-                symbols.add((h["exchange"], h["tradingsymbol"].replace("#", "")))
+                add_symbol(symbols, h.get("exchange"), h.get("tradingsymbol"))
             else:
-                symbols.add((h.exchange, h.tradingsymbol.replace("#", "")))
+                add_symbol(symbols, getattr(h, 'exchange', None), getattr(h, 'tradingsymbol', None))
         for g in gtts:
-            if g["orders"][0]["transaction_type"] == "BUY":
-                symbols.add((g["condition"]["exchange"], g["condition"]["tradingsymbol"]))
+            if g.get("orders") and g["orders"][0].get("transaction_type") == "BUY" and g.get("condition"):
+                add_symbol(symbols, g["condition"].get("exchange"), g["condition"].get("tradingsymbol"))
         for s in entry_levels:
-            symbols.add((s["exchange"], s["symbol"]))
+            add_symbol(symbols, s.get("exchange"), s.get("symbol"))
         logging.debug("Collected symbols for CMP fetch: ")
         return list(symbols)
 
@@ -40,7 +52,7 @@ class CMPManager:
         try:
             df = pd.read_csv(self.csv_path)
             df.columns = [col.strip() for col in df.columns]
-            symbol_clean = symbol.replace("-BE", "").strip().upper()
+            symbol_clean = str(symbol).replace("-BE", "").strip().upper()
             match = df[df['SYMBOL'].str.upper() == symbol_clean]
             if not match.empty:
                 isin = match.iloc[0]['ISIN NUMBER']
@@ -147,3 +159,49 @@ class CMPManager:
         for (exchange, symbol), quote in self.cache.items():
             cmp = quote.get("last_price", "N/A")
             print(f"{symbol:<15} {exchange:<10} {cmp:<10}")
+
+    # ──────────────── Historical Data ──────────────── #
+    def get_historical_data(self, symbol, interval='day', start_date=None, end_date=None):
+        """
+        Fetch historical candle data for a given symbol using the Upstox API.
+        - Fetches last 90 days of data if start_date and end_date are not provided.
+        """
+        logging.debug(f"Getting historical data for {symbol} via CMPManager (Upstox proxy)")
+
+        instrument_key = self._get_instrument_key(symbol, 'NSE_EQ')
+        if not instrument_key:
+            logging.error(f"Could not resolve instrument key for symbol: {symbol}")
+            return None
+
+        if not end_date:
+            end_date = date.today()
+        if not start_date:
+            start_date = end_date - timedelta(days=90)
+
+        end_date_str = end_date.strftime('%Y-%m-%d')
+        start_date_str = start_date.strftime('%Y-%m-%d')
+
+        # URL encode the instrument key to handle special characters like '|'
+        encoded_instrument_key = requests.utils.quote(instrument_key)
+        url = f"https://api.upstox.com/v2/historical-candle/{encoded_instrument_key}/{interval}/{end_date_str}/{start_date_str}"
+
+        try:
+            token = self.session_manager.get_valid_upstox_access_token()
+            headers = {
+                'Accept': 'application/json',
+                'Authorization': f'Bearer {token}'
+            }
+
+            response = requests.get(url, headers=headers)
+            response.raise_for_status()  # This will raise an HTTPError for bad responses (4xx or 5xx)
+
+            data = response.json()
+            if data.get('status') != 'success':
+                logging.error(f"Upstox API returned a non-success status for historical data: {data}")
+                return None
+
+            logging.debug(f"Successfully fetched historical data for {symbol} via CMPManager")
+            return data.get('data', {}).get('candles', [])
+        except requests.exceptions.RequestException as e:
+            logging.error(f"Error fetching historical data from Upstox via CMPManager: {e}")
+            raise e  # Re-raise the exception to be caught by the caller

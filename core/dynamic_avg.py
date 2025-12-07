@@ -18,7 +18,11 @@ class DynamicAveragingPlanner:
 
     def identify_candidates(self) -> List[Dict]:
         candidates = []
-        entry_levels_map = {entry.get("symbol", "").strip().upper(): entry for entry in self.entry_levels}
+        entry_levels_map = {
+            str(entry.get("symbol")).strip().upper(): entry
+            for entry in self.entry_levels
+            if isinstance(entry.get("symbol"), str) and entry.get("symbol", "").strip()
+        }
 
         from datetime import datetime
         # Get completed trades for the day

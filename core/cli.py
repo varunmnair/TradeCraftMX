@@ -1,3 +1,4 @@
+import math
 import typer
 import json
 import os
@@ -433,3 +434,88 @@ def ask_ai_analyst():
 
         except Exception as e:
             print(f"❌ An unexpected error occurred: {e}")
+
+@app.command()
+def revise_entry_levels():
+    """Revise entry levels for all symbols based on technical analysis."""
+    try:
+        from datetime import datetime, timedelta
+        print("🔄 Refreshing caches and preparing for entry level revision...")
+        current_session.refresh_all_caches()
+        broker = current_session.broker
+        cmp_manager = current_session.get_cmp_manager()
+        all_entry_levels = current_session.get_entry_levels()
+
+        if not all_entry_levels:
+            print("⚠️ Entry levels file is empty or could not be read.")
+            return
+
+        from core.entry_level_reviser import EntryLevelReviser
+
+        # Filter symbols based on the last updated date
+        today = datetime.now().date()
+        symbols_to_revise = []
+        for scrip in all_entry_levels:
+            last_updated_str = scrip.get("Last Updated") # Match CSV header "Last Updated"
+            # If last_updated is missing, do not assume the symbol needs revision.
+            # Also check if it's not a string (e.g., NaN which is a float)
+            if not isinstance(last_updated_str, str) or not last_updated_str.strip():
+                logging.debug(f"Skipping revision for {scrip.get('symbol')} because 'Last Updated' is missing or not a string.")
+                continue
+            try:
+                last_updated_date = datetime.strptime(last_updated_str, '%d-%b-%y').date()
+                if (today - last_updated_date).days > 30:
+                    symbols_to_revise.append(scrip)
+            except ValueError:
+                logging.warning(f"Could not parse 'last_updated' date for {scrip.get('symbol')}: '{last_updated_str}'. Revising anyway.")
+                symbols_to_revise.append(scrip)
+        
+        revision_results = []
+        total_symbols = len(symbols_to_revise)
+        print(f"Found {total_symbols} symbols (out of {len(all_entry_levels)}) needing revision (last updated > 30 days ago). This may take a few minutes...")
+
+        for i, scrip in enumerate(symbols_to_revise):
+            symbol = scrip.get("symbol")
+            # Skip if symbol is not a valid string (e.g., it's NaN, None, or a number)
+            if not isinstance(symbol, str) or not symbol.strip() or symbol.strip().isnumeric():
+                logging.debug(f"Skipping invalid symbol in entry levels: {symbol}")
+                continue
+
+            #print(f"  ({i+1}/{total_symbols}) Analyzing {symbol}...")
+            try:
+                reviser = EntryLevelReviser(symbol, current_session, all_entry_levels)
+                result = reviser.revise_entry_levels()
+
+                old_l1 = result['original']['l1']
+                new_l1 = result['final']['l1']
+                change_pct_l1 = ((new_l1 - old_l1) / old_l1 * 100) if old_l1 else 0
+                
+                metrics = result['metrics']
+                from core.entry_level_reviser import DEFAULT_CONFIG as reviser_config
+
+                revision_results.append({
+                    "Symbol": symbol,
+                    "Old Levels": f"[{old_l1:.1f}, {result['original']['l2']:.1f}, {result['original']['l3']:.1f}]",
+                    "New Levels": f"[{new_l1:.1f}, {result['final']['l2']:.1f}, {result['final']['l3']:.1f}]",
+                    "L1 Δ%": f"{change_pct_l1:.2f}%",
+                    "LTP": f"{metrics['ltp']:.2f}",
+                    "Regime": metrics['regime'],
+                    "ATR": f"{metrics['atr']:.2f}",
+                    "RSI": f"{metrics[f'rsi_{reviser_config['INDICATOR_WINDOW']}']:.1f}",
+                    "ADX": f"{metrics[f'adx_{reviser_config['ADX_PERIOD']}']:.1f}",
+                    "Rationale": result['rationale']
+                })
+            except Exception as e:
+                logging.error(f"Could not revise levels for {symbol}: {e}")
+                print(f"  ❌ Failed to revise levels for {symbol}: {e}")
+
+        # Sort by the absolute value of the change percentage to see the biggest movers first
+        sorted_results = sorted(revision_results, key=lambda x: abs(float(x["L1 Δ%"].strip('%'))), reverse=True)
+
+        print_table(sorted_results, 
+                    ["Symbol", "Old Levels", "New Levels", "L1 Δ%", "LTP", "Regime", "ATR", "RSI", "ADX", "Rationale"],
+                    title="📈 Entry Level Revision Analysis")
+
+    except Exception as e:
+        print(f"❌ An error occurred during the revision process: {e}")
+        traceback.print_exc()

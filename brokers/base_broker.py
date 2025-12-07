@@ -92,4 +92,11 @@ class BaseBroker(ABC):
         """
         pass
 
+    @abstractmethod
+    def get_historical_data(self, symbol, interval, start_date, end_date):
+        """
+        Fetch historical candle data for a given symbol.
+        """
+        pass
+
 

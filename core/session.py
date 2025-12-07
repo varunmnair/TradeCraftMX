@@ -1,6 +1,7 @@
 # core/session.py
 
 import time
+from datetime import datetime
 import json
 import os
 import logging
@@ -87,6 +88,15 @@ class SessionCache:
         if self.is_stale():
             self.refresh_all_caches()
         return self.cmp_manager
+
+    def get_historical_data(self, symbol: str, interval: str, from_date=None, to_date=None):
+        """
+        Delegates the historical data fetch call to the broker.
+        """
+        if self.is_stale():
+            self.refresh_all_caches()
+        return self.cmp_manager.get_historical_data(symbol, interval, from_date, to_date)
+
     # ──────────────── GTT Plan Cache ──────────────── #
     def write_gtt_plan(self, orders: list):
         os.makedirs(os.path.dirname(self.GTT_PLAN_CACHE_PATH), exist_ok=True)

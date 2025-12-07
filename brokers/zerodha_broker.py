@@ -3,6 +3,7 @@ from kiteconnect import KiteConnect
 from core.utils import read_csv, write_csv
 import os
 import logging
+from datetime import datetime, timedelta
 
 class ZerodhaBroker(BaseBroker):
     """
@@ -15,6 +16,7 @@ class ZerodhaBroker(BaseBroker):
         self.kite = KiteConnect(api_key=api_key)
         self.kite.set_access_token(access_token)
         self._trades = []
+        self.instrument_cache = None
         # For compatibility with existing code that uses kite.TRANSACTION_TYPE_BUY
         self.TRANSACTION_TYPE_BUY = 'BUY'
         self.TRANSACTION_TYPE_SELL = 'SELL'
@@ -187,3 +189,28 @@ class ZerodhaBroker(BaseBroker):
     def download_historical_trades(self, start_date, end_date):
         logging.info("Downloading historical trades is not implemented for Zerodha yet.")
         return []
+
+    def _get_instrument_token(self, symbol, exchange="NSE"):
+        if not self.instrument_cache:
+            logging.debug("Instrument cache is empty. Fetching instruments from API...")
+            self.instrument_cache = self.kite.instruments(exchange)
+        
+        symbol_upper = symbol.upper()
+        
+        for instrument in self.instrument_cache:
+            if instrument['tradingsymbol'] == symbol_upper:
+                logging.debug(f"Found instrument token for {symbol}: {instrument['instrument_token']}")
+                return instrument['instrument_token']
+                
+        raise Exception(f"Could not find instrument token for symbol {symbol} in exchange {exchange}")
+
+    def get_historical_data(self, symbol, interval, start_date, end_date):
+        """
+        Fetch historical candle data for a given symbol.
+        - Fetches last 90 days of data if start_date and end_date are not provided.
+        - NOTE: This is not directly supported by Zerodha's Kite Connect API for daily use.
+        """
+        logging.warning("get_historical_data is not supported directly by ZerodhaBroker due to API restrictions.")
+        logging.error("Error fetching historical data from Zerodha: Insufficient permission for that call.")
+        # The actual fetching should be handled by a proxy manager like CMPManager.
+        return None

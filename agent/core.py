@@ -11,7 +11,7 @@ class Agent:
         if not api_key:
             raise ValueError("GEMINI_API_KEY environment variable not set.")
         genai.configure(api_key=api_key)
-        return genai.GenerativeModel('gemini-2.5-flash-lite-preview-06-17')
+        return genai.GenerativeModel('gemini-1.5-flash-latest')
 
     def run(self, user_query: str) -> dict:
         """
