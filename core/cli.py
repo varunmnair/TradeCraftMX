@@ -85,7 +85,7 @@ def list_entry_levels(filter_ltp: float = typer.Option(None, help="Filter orders
 
         # 2. Identify candidates and generate the plan
         candidates = planner.identify_candidates()
-        new_orders = planner.generate_plan(candidates)
+        new_orders = planner.generate_plan(candidates, apply_risk_management=False)
         skipped_orders = planner.skipped_orders
 
         # 3. Display skipped orders
@@ -115,13 +115,14 @@ def list_entry_levels(filter_ltp: float = typer.Option(None, help="Filter orders
                     "Trigger Price": order["trigger"],
                     "LTP": order["ltp"],
                     "Order Amount": order_amount,
-                    "Entry Level": order["entry"]
+                    "Entry Level": order["entry"],
+                    "Risk Adj.": order.get("risk_adj", "N/A")
                 })
 
             print_table(
                 sorted(display_orders, key=lambda item: item['Symbol']),
-                ["Symbol", "Order Price", "Trigger Price", "LTP", "Order Amount", "Entry Level"],
-                title="📊 New GTT Plan - Multi-Level Entry Strategy",
+                ["Symbol", "Order Price", "Trigger Price", "LTP", "Order Amount", "Entry Level", "Risk Adj."],
+                title="📊 Draft GTT Plan - Multi-Level Entry Strategy",
                 spacing=6
             )
         else:
@@ -131,6 +132,48 @@ def list_entry_levels(filter_ltp: float = typer.Option(None, help="Filter orders
         typer.echo(f"❌ Exception in list_entry_levels: {e}")
         traceback.print_exc()
 
+@app.command()
+def apply_risk_management():
+    """Applies risk management rules to the cached draft GTT plan."""
+    try:
+        draft_plan = current_session.read_gtt_plan()
+        if not draft_plan:
+            print("ℹ️ No draft plan found in cache. Please generate a plan first.")
+            return
+
+        # Re-instantiate the planner to use its methods
+        planner = MultiLevelEntryStrategy(
+            broker=current_session.broker,
+            cmp_manager=current_session.get_cmp_manager(),
+            holdings=current_session.get_holdings(),
+            entry_levels=current_session.get_entry_levels(),
+            gtt_cache=current_session.get_gtt_cache()
+        )
+
+        final_plan = planner.apply_risk_to_plan(draft_plan)
+        current_session.write_gtt_plan(final_plan) # Overwrite cache with final plan
+
+        if final_plan:
+            display_orders = []
+            for order in final_plan:
+                order_amount = round(order["price"] * order["qty"], 2)
+                display_orders.append({
+                    "Symbol": order["symbol"],
+                    "Order Price": order["price"],
+                    "Qty": order["qty"],
+                    "Order Amount": order_amount,
+                    "Risk Adj.": order.get("risk_adj", "N/A"),
+                    "Reason": order.get("risk_reasons", "")
+                })
+            print_table(
+                sorted(display_orders, key=lambda item: item['Symbol']),
+                ["Symbol", "Order Price", "Qty", "Order Amount", "Risk Adj.", "Reason"],
+                title="📊 Finalized GTT Plan (After Risk Management)",
+                spacing=4
+            )
+    except Exception as e:
+        print(f"❌ An error occurred while applying risk management: {e}")
+        traceback.print_exc()
 
 @app.command()
 def place_gtt_orders():

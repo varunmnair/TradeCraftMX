@@ -89,13 +89,13 @@ class SessionCache:
             self.refresh_all_caches()
         return self.cmp_manager
 
-    def get_historical_data(self, symbol: str, interval: str, from_date=None, to_date=None):
+    def get_historical_data(self, symbol: str, exchange: str, interval: str, to_date=None, from_date=None):
         """
         Delegates the historical data fetch call to the broker.
         """
         if self.is_stale():
             self.refresh_all_caches()
-        return self.cmp_manager.get_historical_data(symbol, interval, from_date, to_date)
+        return self.cmp_manager.get_historical_data(symbol, exchange, interval, to_date, from_date)
 
     # ──────────────── GTT Plan Cache ──────────────── #
     def write_gtt_plan(self, orders: list):

@@ -2,6 +2,7 @@ import logging
 import math
 from typing import List, Dict, Tuple
 from core.entry import BaseEntryStrategy
+from core.risk_manager import RiskManager
 
 
 class MultiLevelEntryStrategy(BaseEntryStrategy):
@@ -12,6 +13,7 @@ class MultiLevelEntryStrategy(BaseEntryStrategy):
         super().__init__(broker, cmp_manager, holdings)
         self.entry_levels = entry_levels
         self.gtt_cache = gtt_cache
+        self.risk_manager = RiskManager()
         self.skipped_orders = []
 
     def _is_valid_price(self, price) -> bool:
@@ -162,7 +164,7 @@ class MultiLevelEntryStrategy(BaseEntryStrategy):
             return 0
         return int(amount_to_invest / entry_price)
 
-    def generate_plan(self, candidates: List[Dict]) -> List[Dict]:
+    def generate_plan(self, candidates: List[Dict], apply_risk_management: bool = False) -> List[Dict]:
         logging.debug(f"--- Generating Multi-Level Entry Plan ---")
         final_plan = []
         holdings_map = {h["tradingsymbol"].replace("#", "").replace("-BE", ""): h for h in self.holdings}
@@ -191,10 +193,38 @@ class MultiLevelEntryStrategy(BaseEntryStrategy):
                 self.skipped_orders.append(self._create_skipped_order(symbol, "Invalid entry price for quantity calculation", exchange, ltp, entry_level))
                 continue
 
+            # Initial amount calculation before risk management
             amount_to_invest = min(target_investment - invested_amount, allocated - invested_amount)
 
+            if apply_risk_management:
+                # This block is now only called when explicitly requested
+                adjustments, risk_reasons = self._get_risk_adjustments(exchange, symbol, ltp, scrip)
+                
+                scale_factor = adjustments.get("scale_factor", 1.0)
+                sdt_cap_pct = adjustments.get("sdt_cap_pct")
+                reserve_pct = adjustments.get("per_symbol_reserve_pct", 0.0)
+
+                # Apply Per-Symbol Reserve
+                max_spendable = allocated * (1 - reserve_pct)
+                amount_to_invest = min(amount_to_invest, max_spendable - invested_amount)
+
+                # Apply SDT Cap if triggered
+                if sdt_cap_pct:
+                    capped_investment = allocated * sdt_cap_pct
+                    amount_to_invest = min(amount_to_invest, capped_investment - invested_amount)
+
+                # Apply scaling factor (Volatility, Gap-down etc.)
+                amount_to_invest *= scale_factor
+                
+                risk_adj_str = f"{scale_factor:.2f}{' (SDT Cap ' + str(sdt_cap_pct) + ')' if sdt_cap_pct else ''}"
+            else:
+                # Default values when not applying risk management
+                risk_adj_str = "N/A"
+                risk_reasons = ""
+
             if amount_to_invest <= 0:
-                self.skipped_orders.append(self._create_skipped_order(symbol, "No further investment needed for this level", exchange, ltp, entry_level))
+                reason = f"Amount is zero after risk rules. Reasons: {risk_reasons}" if risk_reasons else "No further investment needed"
+                self.skipped_orders.append(self._create_skipped_order(symbol, reason, exchange, ltp, entry_level))
                 continue
 
             # First, determine the final order price
@@ -221,7 +251,71 @@ class MultiLevelEntryStrategy(BaseEntryStrategy):
                 "trigger": trigger,
                 "qty": qty,
                 "ltp": round(ltp, 2),
-                "entry": entry_level
+                "entry": entry_level,
+                "risk_adj": risk_adj_str,
+                "risk_reasons": risk_reasons,
+                # Store original amount for recalculation
+                "original_amount": amount_to_invest / scale_factor if 'scale_factor' in locals() and scale_factor != 0 else amount_to_invest
             })
             
+        return final_plan
+
+    def _get_risk_adjustments(self, exchange, symbol, ltp, scrip):
+        """Helper to fetch data and get risk adjustments for a single symbol."""
+        try:
+            quote = self.cmp_manager.get_quote(exchange, symbol)
+            historical_data = self.cmp_manager.get_historical_data(symbol=symbol, exchange=exchange)
+        except Exception as e:
+            logging.error(f"Could not fetch risk data for {symbol}: {e}")
+            self.skipped_orders.append(self._create_skipped_order(symbol, "Failed to fetch risk data (quote/historical)", exchange, ltp))
+            return {}, ""
+
+        scrip_data_for_risk = {
+            'ltp': ltp, 'quote': quote, 'historical': historical_data,
+            'entry1': scrip.get("entry1"), 'entry2': scrip.get("entry2"), 'entry3': scrip.get("entry3"),
+        }
+
+        adjustments = self.risk_manager.assess_risk_and_get_adjustments(scrip_data_for_risk)
+        risk_reasons = ", ".join(adjustments.get("reasons", []))
+        return adjustments, risk_reasons
+
+    def apply_risk_to_plan(self, draft_plan: List[Dict]) -> List[Dict]:
+        """Applies risk management to an existing draft plan."""
+        final_plan = []
+        logging.info(f"Applying risk management to {len(draft_plan)} symbols in the draft plan.")
+
+        for order in draft_plan:
+            symbol = order['symbol']
+            exchange = order['exchange']
+            ltp = order['ltp']
+            
+            # Find the original scrip data from entry_levels
+            scrip = next((s for s in self.entry_levels if s['symbol'] == symbol), None)
+            if not scrip:
+                logging.warning(f"Could not find original entry level data for {symbol}. Skipping risk analysis.")
+                final_plan.append(order) # Add as-is
+                continue
+
+            adjustments, risk_reasons = self._get_risk_adjustments(exchange, symbol, ltp, scrip)
+
+            scale_factor = adjustments.get("scale_factor", 1.0)
+            sdt_cap_pct = adjustments.get("sdt_cap_pct")
+            
+            # Use the original amount calculated before any risk rules
+            amount_to_invest = order['original_amount']
+            amount_to_invest *= scale_factor
+
+            # Recalculate quantity with new amount
+            new_qty = self._calculate_quantity(amount_to_invest, order['price'])
+            
+            if new_qty > 0:
+                final_order = order.copy()
+                final_order['qty'] = new_qty
+                final_order['risk_adj'] = f"{scale_factor:.2f}{' (SDT Cap ' + str(sdt_cap_pct) + ')' if sdt_cap_pct else ''}"
+                final_order['risk_reasons'] = risk_reasons
+                final_plan.append(final_order)
+            else:
+                reason = f"Qty became 0 after risk rules. Reasons: {risk_reasons}"
+                self.skipped_orders.append(self._create_skipped_order(symbol, reason, exchange, ltp, order['entry']))
+
         return final_plan

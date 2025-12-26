@@ -112,18 +112,29 @@ def main_menu():
             if result.exception:
                 print(f"❌ Exception occurred: {result.exception}")
 
-            if input("\n1.1 Place Multi Level Entry orders? (y/n): ").lower() == "y":
-                result = runner.invoke(app, ["place-gtt-orders"], catch_exceptions=False)
+            if input("\n1.4 Refine with EntryPilot (AI Agent)? (y/n): ").lower() == "y":
+                from agent.strategy_agent import EntryPilot
+                agent = EntryPilot()
+                agent.run()
+
+            if input("\n1.1 Apply Risk Management to Plan? (y/n): ").lower() == "y":
+                result = runner.invoke(app, ["apply-risk-management"], catch_exceptions=False)
                 print(result.output)
                 if result.exception:
                     print(f"❌ Exception occurred: {result.exception}")
 
+            if input("\n1.2 Place Multi Level Entry orders? (y/n): ").lower() == "y":
+                result = runner.invoke(app, ["place-gtt-orders"], catch_exceptions=False)
+                print(result.output)
+                if result.exception:
+                    print(f"❌ Exception occurred: {result.exception}")
+            
             result = runner.invoke(app, ["plan-dynamic-avg"], catch_exceptions=False)
             print(result.output)
             if result.exception:
                 print(f"❌ Exception occurred: {result.exception}")
-
-            if input("\n1.2 Place Dynamic Averaging Entry orders? (y/n): ").lower() == "y":
+            
+            if input("\n1.3 Place Dynamic Averaging Entry orders? (y/n): ").lower() == "y":
                 result = runner.invoke(app, ["place-dynamic-averaging-orders"], catch_exceptions=False)
                 print(result.output)
                 if result.exception:

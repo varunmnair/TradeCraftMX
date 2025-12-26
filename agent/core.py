@@ -1,5 +1,6 @@
 import os
 import json
+import logging
 import google.generativeai as genai
 
 class Agent:
@@ -11,7 +12,7 @@ class Agent:
         if not api_key:
             raise ValueError("GEMINI_API_KEY environment variable not set.")
         genai.configure(api_key=api_key)
-        return genai.GenerativeModel('gemini-1.5-flash-latest')
+        return genai.GenerativeModel('gemini-2.5-flash-preview-09-2025')
 
     def run(self, user_query: str) -> dict:
         """
@@ -24,8 +25,13 @@ class Agent:
             dict: The tool call plan from the LLM.
         """
         prompt = self._construct_prompt(user_query)
-        response = self.llm.generate_content(prompt)
-        #print(f"LLM Raw Response: {response.text}")
+        logging.debug(f"Agent Prompt: {prompt}")
+        try:
+            response = self.llm.generate_content(prompt)
+            logging.debug(f"Agent Raw Response: {response.text}")
+        except Exception as e:
+            logging.error(f"Agent Generation Error: {e}")
+            return {"error": str(e)}
 
         try:
             json_text = response.text

@@ -33,8 +33,13 @@ class EntryLevelReviser:
     def _fetch_data(self):
         """Fetches historical data for the symbol."""
         try:
+            # Find the original scrip to get the correct exchange
+            original_scrip = self._find_original_scrip()
+            if not original_scrip:
+                raise ValueError(f"Could not find entry level data for {self.symbol} to determine exchange.")
+            exchange = original_scrip.get("exchange", "NSE")
             # Fetch more data to ensure indicators are stable
-            self.historical_data = self.session.get_historical_data(self.symbol, 'day')
+            self.historical_data = self.session.get_historical_data(self.symbol, exchange, 'day')
             if not self.historical_data or len(self.historical_data) < 50:
                 raise ValueError("Insufficient historical data for analysis.")
             
@@ -132,30 +137,6 @@ class EntryLevelReviser:
                 return scrip
         return None
 
-    def _update_csv(self, new_levels):
-        """Updates the master entry levels CSV file."""
-        try:
-            # Assuming the broker object has the path to the entry levels file
-            filepath = f"data/{self.session.broker.user_id}-{self.session.broker.broker_name}-entry-levels.csv"
-            df = pd.read_csv(filepath)
-
-            # Find the row for the symbol
-            symbol_index = df[df['symbol'] == self.symbol].index
-            if not symbol_index.empty:
-                idx = symbol_index[0]
-                df.loc[idx, 'entry1'] = round(new_levels['l1'], 2)
-                df.loc[idx, 'entry2'] = round(new_levels['l2'], 2)
-                df.loc[idx, 'entry3'] = round(new_levels['l3'], 2)
-                df.loc[idx, 'Last Updated'] = datetime.now().strftime('%d-%b-%y')
-
-                df.to_csv(filepath, index=False)
-                logging.info(f"Successfully updated entry levels for {self.symbol} in {filepath}")
-            else:
-                logging.warning(f"Could not find {self.symbol} in {filepath} to update.")
-
-        except Exception as e:
-            logging.error(f"Failed to update CSV for {self.symbol}: {e}")
-
     def revise_entry_levels(self):
         """
         The main method to orchestrate the revision process.
@@ -183,9 +164,6 @@ class EntryLevelReviser:
                 "l2": original_scrip.get('entry2', 0),
                 "l3": original_scrip.get('entry3', 0)
             }
-
-            # 6. Update the CSV file with new levels
-            self._update_csv(new_levels)
 
             # 7. Return the comprehensive result
             return {

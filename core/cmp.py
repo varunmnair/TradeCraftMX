@@ -161,29 +161,40 @@ class CMPManager:
             print(f"{symbol:<15} {exchange:<10} {cmp:<10}")
 
     # ──────────────── Historical Data ──────────────── #
-    def get_historical_data(self, symbol, interval='day', start_date=None, end_date=None):
+    def get_historical_data(self, symbol, exchange='NSE', interval='day', to_date=None, from_date=None):
         """
         Fetch historical candle data for a given symbol using the Upstox API.
-        - Fetches last 90 days of data if start_date and end_date are not provided.
+        - The Upstox API URL format is /to_date/from_date.
+        - Fetches last 90 days of data if from_date and to_date are not provided.
         """
         logging.debug(f"Getting historical data for {symbol} via CMPManager (Upstox proxy)")
-
-        instrument_key = self._get_instrument_key(symbol, 'NSE_EQ')
+        
+        segment = f"{exchange.upper()}_EQ"
+        instrument_key = self._get_instrument_key(symbol, segment)
         if not instrument_key:
             logging.error(f"Could not resolve instrument key for symbol: {symbol}")
             return None
 
-        if not end_date:
-            end_date = date.today()
-        if not start_date:
-            start_date = end_date - timedelta(days=90)
+        # Set default dates if not provided
+        if not to_date:
+            to_date = date.today()
+        if not from_date:
+            from_date = to_date - timedelta(days=90)
 
-        end_date_str = end_date.strftime('%Y-%m-%d')
-        start_date_str = start_date.strftime('%Y-%m-%d')
+        # Defensive check: Ensure `to_date` is not before `from_date`. Swap if necessary.
+        if from_date > to_date:
+            logging.warning(f"from_date {from_date} was after to_date {to_date}. Swapping them.")
+            from_date, to_date = to_date, from_date
+
+        # The API requires to_date >= from_date.
+        end_date_str = to_date.strftime('%Y-%m-%d')
+        start_date_str = from_date.strftime('%Y-%m-%d')
 
         # URL encode the instrument key to handle special characters like '|'
         encoded_instrument_key = requests.utils.quote(instrument_key)
+        # Corrected URL format: The API expects /to_date/from_date
         url = f"https://api.upstox.com/v2/historical-candle/{encoded_instrument_key}/{interval}/{end_date_str}/{start_date_str}"
+        logging.debug(f"Constructed historical data URL: {url}")
 
         try:
             token = self.session_manager.get_valid_upstox_access_token()
