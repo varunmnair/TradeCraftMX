@@ -12,6 +12,40 @@ class StrategyTools:
         self.working_plan = list(self.baseline_plan) # Shallow copy
         self.history_stack = [] # To store previous states of working_plan
 
+    def get_definitions(self):
+        return [
+            {
+                "name": "filter_by_query",
+                "args": "query: str",
+                "desc": "Filter plan using pandas query syntax (e.g., \"entry == 'E1'\", \"price < 500\", \"(price - ltp)/ltp > 0.05\")."
+            },
+            {
+                "name": "undo_last_action",
+                "args": "",
+                "desc": "Revert to previous plan state."
+            },
+            {
+                "name": "reset_to_baseline",
+                "args": "",
+                "desc": "Reload original plan."
+            },
+            {
+                "name": "apply_risk_management",
+                "args": "",
+                "desc": "Apply risk rules."
+            },
+            {
+                "name": "show_plan",
+                "args": "",
+                "desc": "Print the current plan table to the console."
+            },
+            {
+                "name": "place_orders",
+                "args": "",
+                "desc": "Execute the plan (Final Action)."
+            }
+        ]
+
     def _get_session(self):
         if not cli.current_session:
             raise ValueError("Session not initialized.")

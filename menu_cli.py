@@ -11,6 +11,7 @@ from core.session_manager import SessionManager
 from core.holdings import HoldingsAnalyzer
 from brokers.broker_factory import BrokerFactory
 from core.entry_level_reviser import EntryLevelReviser
+from core.cli import ask_ai_analyst, list_duplicate_gtt_symbols, show_total_buy_gtt_amount
 
 
 parser = argparse.ArgumentParser(description='TradeCraftX CLI')
@@ -24,7 +25,6 @@ args = parser.parse_args()
 setup_logging(args.log_level.upper())
 runner = CliRunner()
 
-from core.cli import ask_ai_analyst, list_duplicate_gtt_symbols, show_total_buy_gtt_amount
 
 def menu_gtt_summary():
     duplicates = list_duplicate_gtt_symbols()

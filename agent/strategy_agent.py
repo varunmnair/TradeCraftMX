@@ -1,20 +1,12 @@
-import os
 import json
 import logging
-import google.generativeai as genai
+from agent.base import BaseAgent
 from agent.strategy_tools import StrategyTools
 
-class EntryPilot:
+class EntryPilot(BaseAgent):
     def __init__(self):
+        super().__init__('gemini-2.5-flash-preview-09-2025')
         self.tools = StrategyTools()
-        self.llm = self._setup_llm()
-
-    def _setup_llm(self):
-        api_key = os.environ.get("GEMINI_API_KEY")
-        if not api_key:
-            raise ValueError("GEMINI_API_KEY environment variable not set.")
-        genai.configure(api_key=api_key)
-        return genai.GenerativeModel('gemini-2.5-flash-preview-09-2025')
 
     def run(self):
         print("\n🤖 EntryPilot: I'm ready to help you refine your entry strategy. (Type 'exit' to stop)")
@@ -36,7 +28,7 @@ class EntryPilot:
         step_count = 0
         
         # Initial Context
-        last_observation = "Starting session. Plan loaded."
+        action_history = ["Starting session. Plan loaded."]
 
         while step_count < max_steps:
             step_count += 1
@@ -53,6 +45,13 @@ class EntryPilot:
             if len(current_plan) > 20:
                 plan_context += f"\n... ({len(current_plan) - 20} more orders)"
 
+            # Dynamically generate tool list from registry
+            tool_list_str = ""
+            for i, t in enumerate(self.tools.get_definitions(), 1):
+                tool_list_str += f"{i}. `{t['name']}({t['args']})`: {t['desc']}\n            "
+
+            history_str = "\n".join(action_history)
+
             # 2. Construct Prompt
             prompt = f"""
             You are EntryPilot, an intelligent trading orchestrator.
@@ -61,22 +60,21 @@ class EntryPilot:
             
             **Current State:**
             - Plan Summary: {self.tools.get_plan_stats()}
-            - Last Observation: {last_observation}
+            
+            **Execution History:**
+            {history_str}
+
             - Plan Data (Sample):
             ```json
             {plan_context}
             ```
 
             **Available Tools:**
-            1. `filter_by_query(query: str)`: Filter plan using pandas query syntax (e.g., "entry == 'E1'", "price < 500", "(price - ltp)/ltp > 0.05").
-            2. `undo_last_action()`: Revert to previous plan state.
-            3. `reset_to_baseline()`: Reload original plan.
-            4. `apply_risk_management()`: Apply risk rules.
-            5. `show_plan()`: Print the current plan table to the console.
-            6. `place_orders()`: Execute the plan (Final Action).
+            {tool_list_str}
 
             **Instructions:**
             - Decide the NEXT step to achieve the Goal.
+            - Review the **Execution History** to see what has already been done. Do NOT repeat steps (like applying risk or filtering) if they are already completed.
             - If the user asks to "place orders", you MUST use the `place_orders` tool.
             - If the user asks to "show" or "display" the plan, you MUST use the `show_plan()` tool. Do not add extra filters unless explicitly asked.
             - If the goal is met or you need user input, set "stop": true.
@@ -143,9 +141,10 @@ class EntryPilot:
                     stop = True # Force stop after placing orders
                 
                 # 7. Observe
-                last_observation = tool_result
                 print(f"[Step {step_count}] Act  → {tool_result}")
-                print(f"[Step {step_count}] Obs  → {self.tools.get_plan_stats()}")
+                plan_stats = self.tools.get_plan_stats()
+                print(f"[Step {step_count}] Obs  → {plan_stats}")
+                action_history.append(f"Step {step_count}: Executed {tool_name}. Result: {tool_result}. Plan Stats: {plan_stats}")
 
                 if stop:
                     if tool_name == "place_orders":

@@ -12,7 +12,8 @@ class AgentManager:
         Handles a single user query to the AI analyst.
         """
         try:
-            plan = self.agent.run(user_query)
+            definitions = self.tool_registry.get_definitions()
+            plan = self.agent.run(user_query, tool_definitions=definitions)
             if plan.get("error"):
                 return f"❌ Error from AI: {plan['error']}"
 

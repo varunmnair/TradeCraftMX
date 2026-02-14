@@ -17,6 +17,20 @@ class ToolRegistry:
             "get_portfolio_summary": self.get_portfolio_summary
         }
 
+    def get_definitions(self):
+        return [
+            {
+                "tool_name": "get_portfolio_summary",
+                "description": "Analyzes the portfolio for a given time period and returns a summary.",
+                "parameters": {
+                    "time_period": {
+                        "type": "str",
+                        "description": "The time period to analyze (e.g., 'last month')."
+                    }
+                }
+            }
+        ]
+
     def get_portfolio_summary(self, time_period: str) -> str:
         """
         Analyzes the portfolio for a given time period and returns a summary.
